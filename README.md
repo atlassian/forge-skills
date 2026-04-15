@@ -22,13 +22,15 @@ Gives your agent access to up-to-date Forge documentation, template registries, 
 
 Provides Atlassian Design System lookup for Custom UI apps: component discovery, token reference, and icon search via the `@atlaskit` library.
 
-| Component | What it adds | Examples |
-|-----------|-------------|----------|
-| **Forge App Builder skill** | Scaffold, deploy, install, module choice, CLI workflows | `forge create`, environments, cross-product scopes |
-| **Forge App Review skill** | Pre-deploy review: security, cost, architecture, triggers | Audit before release, reduce invocations, find misconfigurations |
-| **Forge Debugger skill** | Diagnose deploy, runtime, UI, and permission issues | Logs, blank panels, resolver errors, missing app in UI |
-| **Forge MCP Server** | Live Forge documentation and tooling | Template lookup, manifest syntax, UI Kit guides, backend API reference |
-| **ADS MCP Server** | Atlassian Design System lookup | Component discovery, token reference, icon lookup (Custom UI only) |
+
+| Component                   | What it adds                                              | Examples                                                               |
+| --------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Forge App Builder skill** | Scaffold, deploy, install, module choice, CLI workflows   | `forge create`, environments, cross-product scopes                     |
+| **Forge App Review skill**  | Pre-deploy review: security, cost, architecture, triggers | Audit before release, reduce invocations, find misconfigurations       |
+| **Forge Debugger skill**    | Diagnose deploy, runtime, UI, and permission issues       | Logs, blank panels, resolver errors, missing app in UI                 |
+| **Forge MCP Server**        | Live Forge documentation and tooling                      | Template lookup, manifest syntax, UI Kit guides, backend API reference |
+| **ADS MCP Server**          | Atlassian Design System lookup                            | Component discovery, token reference, icon lookup (Custom UI only)     |
+
 
 ## Prerequisites
 
@@ -39,10 +41,6 @@ Before you install, make sure you have:
 - **Python 3** available on your PATH (used by helper scripts)
 
 ## Install
-
-### Cursor
-
-Coming soon
 
 ### Claude Code
 
@@ -60,18 +58,15 @@ gemini extensions install https://github.com/atlassian/forge-skills
 
 ```bash
 copilot plugin install atlassian/forge-skills
-
 ```
 
 ### OpenAI Codex
 
-This repository includes a repo-scoped marketplace at [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) (see [Codex: Build plugins](https://developers.openai.com/codex/plugins/build)).
+Coming soon
 
-1. Clone this repo and open it as your **workspace root** (the folder that contains `.codex-plugin/` and `skills/`).
-2. In Codex, open the plugin directory and select the **Forge Skills** marketplace, then install **forge-skills**.
-3. Restart Codex if the plugin does not appear.
+### Cursor
 
-To use the plugin from another project instead, copy or submodule this repo under that project’s `plugins/` (or similar) and add a marketplace entry whose `source.path` points at that folder, or use a [personal marketplace](https://developers.openai.com/codex/plugins/build) under `~/.agents/plugins/marketplace.json`.
+Coming soon
 
 ## Verify the installation
 
@@ -122,13 +117,15 @@ Once the plugin is installed, try prompts like these:
 
 ## What you get
 
-| Component | Default location | Purpose |
-|-----------|-----------------|---------|
-| **Forge App Builder** | `skills/forge-app-builder/` | Create, deploy, install; helper scripts and tests |
-| **Forge App Review** | `skills/forge-app-review/` | Pre-deploy review and audits (`SKILL.md`, README) |
-| **Forge Debugger** | `skills/forge-debugger/` | Troubleshooting and diagnostics (`SKILL.md`, README) |
-| **MCP config** | `.mcp.json` | Forge MCP Server and ADS MCP Server configuration |
-| **Plugin manifests** | `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `plugin.json`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring |
+
+| Component             | Default location                                                                               | Purpose                                              |
+| --------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| **Forge App Builder** | `skills/forge-app-builder/`                                                                    | Create, deploy, install; helper scripts and tests    |
+| **Forge App Review**  | `skills/forge-app-review/`                                                                     | Pre-deploy review and audits (`SKILL.md`, README)    |
+| **Forge Debugger**    | `skills/forge-debugger/`                                                                       | Troubleshooting and diagnostics (`SKILL.md`, README) |
+| **MCP config**        | `.mcp.json`                                                                                    | Forge MCP Server and ADS MCP Server configuration    |
+| **Plugin manifests**  | `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `plugin.json`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring              |
+
 
 ## Authentication
 
