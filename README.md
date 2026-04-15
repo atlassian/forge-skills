@@ -32,14 +32,8 @@ Provides Atlassian Design System lookup for Custom UI apps: component discovery,
 
 Before you install, make sure you have:
 
-- An [Atlassian account](https://id.atlassian.com) with at least one [developer space](https://developer.atlassian.com/console/)
+- An [Atlassian account](https://id.atlassian.com)
 - **Node.js 22+** (`node -v`) — required for Forge CLI and app builds
-- **Forge CLI** (recommended) — if it is not installed yet, the Forge App Builder skill will install it for you (`npm install -g @forge/cli`). You still need to authenticate when prompted:
-
-```bash
-forge login
-```
-
 - **Python 3** available on your PATH (used by helper scripts)
 
 ## Install
