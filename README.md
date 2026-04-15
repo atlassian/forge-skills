@@ -42,16 +42,12 @@ Before you install, make sure you have:
 
 ### Cursor
 
-```
-Install from source using this repository.
-```
-
-Then restart Cursor (or run "Developer: Reload Window").
+Coming soon
 
 ### Claude Code
 
 ```
-/plugin install from source using this repository
+/plugin marketplace add atlassian/forge-skills
 ```
 
 ### Gemini CLI
@@ -63,14 +59,19 @@ gemini extensions install https://github.com/atlassian/forge-skills
 ### GitHub Copilot CLI
 
 ```bash
-copilot plugin install .
-```
+copilot plugin install atlassian/forge-skills
 
-Re-install after local changes (Copilot caches plugin components).
+```
 
 ### OpenAI Codex
 
-Install through a Codex marketplace entry (repo or personal) that points `source.path` at this plugin directory, then restart Codex.
+This repository includes a repo-scoped marketplace at [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) (see [Codex: Build plugins](https://developers.openai.com/codex/plugins/build)).
+
+1. Clone this repo and open it as your **workspace root** (the folder that contains `.codex-plugin/` and `skills/`).
+2. In Codex, open the plugin directory and select the **Forge Skills** marketplace, then install **forge-skills**.
+3. Restart Codex if the plugin does not appear.
+
+To use the plugin from another project instead, copy or submodule this repo under that project’s `plugins/` (or similar) and add a marketplace entry whose `source.path` points at that folder, or use a [personal marketplace](https://developers.openai.com/codex/plugins/build) under `~/.agents/plugins/marketplace.json`.
 
 ## Verify the installation
 
