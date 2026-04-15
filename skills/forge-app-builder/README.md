@@ -4,63 +4,20 @@ Guides creation, deployment, and installation of Atlassian Forge apps (Jira widg
 
 ## Installation
 
-### Cursor
+This skill ships inside the **[Forge Skills](https://github.com/atlassian/forge-skills)** plugin bundle (`skills/forge-app-builder/`). Prefer installing that repo as a plugin in your editor or CLI so you get the skill plus Forge and ADS MCP configuration. See the [forge-skills README](https://github.com/atlassian/forge-skills/blob/main/README.md) for Cursor, Claude Code, Gemini, Codex, and Copilot CLI.
 
-1. Clone this repository into your Cursor skills directory:
+### Using only this skill folder (advanced)
 
-   ```bash
-   git clone https://bitbucket.org/atlassianlabs/forge-app-builder-skill.git ~/.cursor/skills/forge-app-builder
-   ```
-
-2. The skill will be automatically discovered by Cursor. Use it when building Forge apps by mentioning creating a new Forge app.
-
-**Alternative (project-scoped):** To make the skill available only for a specific project, clone into the project's `.cursor/skills/` directory:
+If your host can load a skill from an arbitrary path, point it at `skills/forge-app-builder` inside a checkout of [forge-skills](https://github.com/atlassian/forge-skills). For example, clone the repo and symlink into a global skills directory:
 
 ```bash
-mkdir -p .cursor/skills
-git clone https://bitbucket.org/atlassianlabs/forge-app-builder-skill.git .cursor/skills/forge-app-builder
+git clone https://github.com/atlassian/forge-skills.git ~/dev/forge-skills
+ln -s ~/dev/forge-skills/skills/forge-app-builder ~/.cursor/skills/forge-app-builder
 ```
 
----
-
-### Rovo Dev
-
-1. Clone this repository into your Rovo Dev skills directory:
-
-   ```bash
-   git clone https://bitbucket.org/atlassianlabs/forge-app-builder-skill.git ~/.agents/skills/forge-app-builder
-   ```
-
-2. The skill will be automatically discovered by Rovo Dev. Use it when building Forge apps by mentioning Forge, Jira widgets, Confluence macros, or similar.
-
-**Alternative (project-scoped):** To make the skill available only for a specific project, clone into the project's `.agents/skills/` directory:
-
-```bash
-mkdir -p .agents/skills
-git clone https://bitbucket.org/atlassianlabs/forge-app-builder-skill.git .agents/skills/forge-app-builder
-```
+Adjust the target path for your tool (`.claude/skills/`, `.agents/skills/`, etc.). You will not get `.mcp.json` from the symlink alone; install the full plugin or add MCP servers yourself if you want them.
 
 ---
-
-### Claude Code
-
-1. Clone this repository into your Claude Code skills directory:
-
-   ```bash
-   git clone https://bitbucket.org/atlassianlabs/forge-app-builder-skill.git ~/.claude/skills/forge-app-builder
-   ```
-
-2. The skill will be automatically discovered by Claude Code. Use it when building Forge apps by mentioning Forge, Jira widgets, Confluence macros, or similar.
-
-**Alternative (project-scoped):** To make the skill available only for a specific project, clone into the project's `.claude/skills/` directory:
-
-```bash
-mkdir -p .claude/skills
-git clone https://bitbucket.org/atlassianlabs/forge-app-builder-skill.git .claude/skills/forge-app-builder
-```
-
----
-
 
 ## What This Skill Provides
 
