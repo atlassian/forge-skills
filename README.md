@@ -1,18 +1,24 @@
 # Forge Skills Plugin
 
-Atlassian Forge lets you build and deploy apps directly on the Atlassian platform -- issue panels, Confluence macros, dashboard gadgets, and more. The Forge Skills Plugin gives your coding agent deep Forge expertise and MCP-backed tooling so it can guide you through the full workflow: picking the right template, scaffolding with `forge create`, configuring scopes, deploying, and installing across products.
+Atlassian Forge lets you build and deploy apps directly on the Atlassian platform -- issue panels, Confluence macros, dashboard gadgets, and more. The Forge Skills Plugin bundles several Forge-focused skills plus MCP-backed tooling so your agent can scaffold apps, review them before deploy, debug production issues, and stay current on Forge APIs and the Atlassian Design System.
 
 ## What's included
 
-### Forge App Builder skill
+### Skills
 
-This plugin ships the **Forge App Builder** skill, which teaches an agent how Forge development gets done. It provides workflows, decision trees, and guardrails for scenarios such as:
+The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the host can load:
+
+**Forge App Builder** (`skills/forge-app-builder/`) teaches end-to-end Forge development: workflows, decision trees, and guardrails for scenarios such as:
 
 - **Scaffold and create** apps with `forge create`, developer space selection, and template validation
 - **Deploy and install** across environments and products with automated scripts
 - **Choose the right module** for Jira issue panels, Confluence macros, dashboard gadgets, global pages, and more
 - **Handle cross-product apps** that need scopes from both Jira and Confluence
 - **Troubleshoot** common CLI errors, deployment failures, and permission issues
+
+**Forge App Review** (`skills/forge-app-review/`) supports pre-deploy review and audits: security, architecture, cost and invocation efficiency, performance, and trigger or scheduling waste.
+
+**Forge Debugger** (`skills/forge-debugger/`) supports systematic troubleshooting when something breaks: `forge` / deploy errors, resolver failures, blank or missing UI, scopes and permissions, and apps that “stopped working” in Jira or Confluence.
 
 ### Forge MCP Server
 
@@ -24,7 +30,9 @@ Provides Atlassian Design System lookup for Custom UI apps: component discovery,
 
 | Component | What it adds | Examples |
 |-----------|-------------|----------|
-| **Forge App Builder skill** | Forge expertise, workflows, and guardrails | Create, deploy, install, module selection, troubleshooting |
+| **Forge App Builder skill** | Scaffold, deploy, install, module choice, CLI workflows | `forge create`, environments, cross-product scopes |
+| **Forge App Review skill** | Pre-deploy review: security, cost, architecture, triggers | Audit before release, reduce invocations, find misconfigurations |
+| **Forge Debugger skill** | Diagnose deploy, runtime, UI, and permission issues | Logs, blank panels, resolver errors, missing app in UI |
 | **Forge MCP Server** | Live Forge documentation and tooling | Template lookup, manifest syntax, UI Kit guides, backend API reference |
 | **ADS MCP Server** | Atlassian Design System lookup | Component discovery, token reference, icon lookup (Custom UI only) |
 
@@ -82,6 +90,11 @@ Ask:
 
 You should get a structured Forge workflow: developer space discovery, template selection, `forge create`, code customization, and deployment -- not just generic code snippets.
 
+Optionally confirm the other skills are available:
+
+- **Review:** e.g. “Review my Forge app for security and unnecessary trigger invocations before I deploy.”
+- **Debug:** e.g. “My Forge issue panel is blank after deploy -- help me trace it.”
+
 ### 2. Verify Forge MCP
 
 Ask:
@@ -109,12 +122,16 @@ Once the plugin is installed, try prompts like these:
 - `My forge create keeps failing with "Prompts can not be meaningfully rendered" -- help!`
 - `Deploy my Forge app to my staging site.`
 - `What scopes do I need for a Confluence app that also reads Jira data?`
+- `Review my Forge app for cost and security before production.`
+- `forge deploy fails with [error] -- what should I check?`
 
 ## What you get
 
 | Component | Default location | Purpose |
 |-----------|-----------------|---------|
-| **Skills** | `skills/forge-app-builder/` | Forge app builder skill with SKILL.md, helper scripts, and tests |
+| **Forge App Builder** | `skills/forge-app-builder/` | Create, deploy, install; helper scripts and tests |
+| **Forge App Review** | `skills/forge-app-review/` | Pre-deploy review and audits (`SKILL.md`, README) |
+| **Forge Debugger** | `skills/forge-debugger/` | Troubleshooting and diagnostics (`SKILL.md`, README) |
 | **MCP config** | `.mcp.json` | Forge MCP Server and ADS MCP Server configuration |
 | **Plugin manifests** | `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `plugin.json`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring |
 
@@ -139,7 +156,7 @@ forge whoami
 ### The agent is not using Forge skills
 
 - Make sure the plugin installed successfully in your host
-- Confirm the `skills/forge-app-builder/` directory is present
+- Confirm the `skills/` directory includes `forge-app-builder`, `forge-app-review`, and `forge-debugger` (each with a `SKILL.md` where applicable)
 - Reload or restart your host so it re-indexes plugins and MCP configuration
 
 ### MCP tools are not showing up
