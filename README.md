@@ -1,4 +1,4 @@
-# Forge Skills Plugin
+# Atlassian Forge Skills
 
 Atlassian Forge lets you build and deploy apps directly on the Atlassian platform -- issue panels, Confluence macros, dashboard gadgets, and more. The Forge Skills Plugin bundles several Forge-focused skills plus MCP-backed tooling so your agent can scaffold apps, review them before deploy, debug production issues, and stay current on Forge APIs and the Atlassian Design System.
 
