@@ -44,8 +44,11 @@ Before you install, make sure you have:
 
 ### Claude Code
 
+Add the marketplace, then install the plugin:
+
 ```
 /plugin marketplace add atlassian/forge-skills
+/plugin install forge-skills@atlassian-forge-skills
 ```
 
 ### Gemini CLI

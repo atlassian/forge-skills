@@ -3,7 +3,7 @@
   "description": "Forge app builder skill bundle with Forge MCP integration for Atlassian Forge workflows.",
   "version": "0.1.0",
   "author": {
-    "name": "Atlassian Labs"
+    "name": "Atlassian Developer"
   },
   "license": "Apache-2.0",
   "keywords": ["forge", "atlassian", "jira", "confluence", "mcp", "skills"],

@@ -1,0 +1,38 @@
+{
+  "name": "forge-skills",
+  "metadata": {
+    "description": "Atlassian Forge Skills — scaffold, review, and debug Forge apps with Forge and ADS MCP documentation.",
+    "version": "0.1.0"
+  },
+  "owner": {
+    "name": "Atlassian Developer",
+    "email": "support@atlassian.com"
+  },
+  "plugins": [
+    {
+      "name": "forge-skills",
+      "source": ".",
+      "description": "Forge-focused skills and MCP configuration for Atlassian Forge: scaffold and deploy apps (forge create, templates, dev spaces), pre-deploy review, systematic debugging, plus Forge docs and Atlassian Design System lookups via MCP.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Atlassian Developer"
+      },
+      "homepage": "https://github.com/atlassian/forge-skills",
+      "repository": "https://github.com/atlassian/forge-skills.git",
+      "license": "Apache-2.0",
+      "keywords": [
+        "forge",
+        "atlassian",
+        "jira",
+        "confluence",
+        "mcp",
+        "skills"
+      ],
+      "skills": [
+        "./skills/forge-app-builder",
+        "./skills/forge-app-review",
+        "./skills/forge-debugger"
+      ]
+    }
+  ]
+}
