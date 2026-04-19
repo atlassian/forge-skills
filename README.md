@@ -50,7 +50,7 @@ Add the marketplace, then install the plugin:
 /plugin marketplace add atlassian/forge-skills
 /plugin install forge-skills@atlassian-forge-skills
 ```
-
+_[Claude Marketplace](https://claude.com/plugins) support coming soon._
 ### Cursor
 
 The Cursor plugin needs to be installed locally. In your terminal run:
@@ -60,7 +60,7 @@ cd ~/.cursor/plugins/local
 git clone https://github.com/atlassian/forge-skills.git
 ```
 
-_Cursor Marketplace support coming soon._
+_[Cursor Marketplace](https://cursor.com/marketplace) support coming soon._
 
 ### Gemini CLI
 
