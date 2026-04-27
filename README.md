@@ -81,7 +81,18 @@ copilot plugin install atlassian/forge-skills
 
 Coming soon
 
+### Rovo Dev
 
+Rovo Dev doesn't currently support plugin installations but you can install the skills and MCP servers separately.
+
+Install the skills:
+```bash
+npx skills add atlassian/forge-skills
+```
+
+Then run `acli rovodev mcp` to edit your MCP configuration in your default editor. Add the details from `.mcp.json`.
+
+Restart Rovo Dev for the skills and MCP to be available.
 
 ## Verify the installation
 
