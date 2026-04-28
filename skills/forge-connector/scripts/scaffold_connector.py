@@ -72,15 +72,16 @@ def check_prerequisites():
     return True
 
 
-def run_forge_create(app_name: str, cwd: str, dev_space_id: str) -> bool:
+def run_forge_create(app_name: str, cwd: str, dev_space_id: str | None) -> bool:
     """Run forge create with the blank template."""
     cmd = [
         "forge", "create",
         "--template", "blank",
         app_name,
-        "--developer-space-id", dev_space_id,
         "--accept-terms",
     ]
+    if dev_space_id:
+        cmd += ["--developer-space-id", dev_space_id]
     print(f"\n📦 Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -383,8 +384,8 @@ def main():
                         help="Human-readable connector name shown in Atlassian Admin UI (e.g. 'My Service')")
     parser.add_argument("--object-type", default="atlassian:document",
                         help="Teamwork Graph object type (default: atlassian:document)")
-    parser.add_argument("--dev-space-id", required=True,
-                        help="Forge developer space ID")
+    parser.add_argument("--dev-space-id", required=False, default=None,
+                        help="Forge developer space ID (optional)")
     parser.add_argument("--directory",
                         help="Parent directory for the app (default: current directory)")
     parser.add_argument("--has-form-config", action="store_true",

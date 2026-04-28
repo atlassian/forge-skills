@@ -32,6 +32,13 @@ Builds a `graph:connector` Forge app that ingests external data into Atlassian's
 4. **Always run the scaffold script yourself** — Do not only give manual instructions; run `scripts/scaffold_connector.py` to generate the boilerplate.
 5. **Always ask the user for their Atlassian site URL** when install is needed — never discover or guess it.
 6. **Atlassian deletes data on disconnect** — When `action = 'DELETED'`, the app only needs to clean up local state; Atlassian removes the Teamwork Graph data automatically.
+7. **Handler arguments are passed directly** — Forge passes the request object as the first argument to handlers, NOT nested under `event.payload`. Config values are at `request.configProperties`, NOT `event.payload.config`. This is the most common source of `TypeError: Cannot destructure property of undefined` errors.
+8. **Use `@forge/kvs` for storage** — Import `kvs` from `@forge/kvs`. Do NOT use `@forge/storage` — its `storage` export is `undefined` at runtime in connector functions.
+9. **Use `graph` named export from `@forge/teamwork-graph`** — The correct import is `const { graph } = require('@forge/teamwork-graph')`. Call `graph.setObjects({ objects, connectionId })`. Do NOT import `setObjects` as a named export directly.
+10. **`validateConnectionHandler` must return `{ success, message }`** — Do NOT throw an Error. Return `{ success: false, message: '...' }` to reject, `{ success: true }` to accept.
+11. **`function` declarations belong under `modules`** — In `manifest.yml`, `function:` is a key under `modules:`, not a top-level key. Placing it at the top level causes a lint error.
+12. **`formConfiguration` uses `form` array with `type: header`** — Do NOT use `fields:` or `beforeYouBegin:`. The correct format uses `form: [{ key, type: header, title, description, properties: [...] }]`.
+13. **Scopes are `read/write/delete:object:jira`** — Use `read:object:jira`, `write:object:jira`, `delete:object:jira`. The scopes `read:graph:teamwork` and `write:graph:teamwork` are invalid and will fail `forge lint`.
 
 ## MCP Prerequisites
 
@@ -58,99 +65,132 @@ Tell the user to run `forge login` in their terminal if not authenticated.
 
 ### Step 1: Discover Developer Spaces
 
-```bash
-forge developer-spaces list --json
+> **Note:** `forge developer-spaces list` does NOT exist in Forge CLI 12.x. You cannot list developer spaces non-interactively.
+
+`forge create` requires an interactive TTY to select a developer space. Ask the user to run it themselves:
+
+```
+Tell the user:
+  cd <parent-directory>
+  forge create --template blank <app-name>
+
+  When prompted, select a Developer Space and let it complete.
+  Come back when done.
 ```
 
-Present the list and ask the user to choose one. Never pick on their behalf.
+The `--dev-space-id` flag in the scaffold script is optional and can be omitted — the script has been updated to skip it when not provided.
 
 ### Step 2: Scaffold the Connector App
 
-Run from the **skill directory** (the directory containing this SKILL.md):
+Run from the **skill directory** (the directory containing this SKILL.md). `--dev-space-id` is optional:
 
 ```bash
 python3 -m scripts.scaffold_connector \
   --name <app-name> \
   --connector-name "<Human Readable Name>" \
   --object-type atlassian:document \
-  --dev-space-id <selected-id> \
   --directory <parent-directory>
 ```
+
+Add `--dev-space-id <id>` only if you have the ID from a previous step.
 
 **Object type selection** — pick the type that best matches the content being ingested (see Object Types table). For mixed content, use `atlassian:document` as the default.
 
 **Form config flag** — add `--has-form-config` if the admin must provide API credentials or connection details (typical for external systems). Omit it for apps that operate entirely within Atlassian (no external credentials needed).
 
+> **If scaffold fails because `forge create` needs a TTY:** The scaffold script will print a manual fallback command. Have the user run `forge create` interactively, then continue from Step 3 — the scaffold script only needs to write `manifest.yml` and `src/index.js` after the directory exists.
+
 ### Step 3: Customize the Generated Code
 
-After scaffolding:
+After scaffolding (or after the user runs `forge create` interactively):
 
 ```bash
 cd <app-name>
 npm install
 ```
 
-Open `src/index.ts` and replace the placeholder `fetchExternalData()` function with real API calls to your external system. The scaffold generates working handler skeletons; fill in your business logic.
+The blank template generates `src/index.js` (JavaScript, not TypeScript). Edit it to add your API calls. The scaffold generates working handler skeletons; fill in your business logic.
 
 #### Key files to edit
 
-
-| File           | What to change                                                      |
-| -------------- | ------------------------------------------------------------------- |
-| `src/index.ts` | `fetchExternalData()` — replace with your API calls                 |
-| `manifest.yml` | Add `permissions.external.fetch.backend` URLs for any external APIs |
+| File           | What to change                                                          |
+| -------------- | ----------------------------------------------------------------------- |
+| `src/index.js` | `fetchExternalData()` — replace with your API calls                     |
+| `manifest.yml` | Add `permissions.external.fetch.backend` URLs for any external APIs     |
+| `package.json` | Add `@forge/api`, `@forge/kvs`, `@forge/teamwork-graph` as dependencies |
 
 
 #### setObjects — ingest data into Teamwork Graph
 
-```typescript
-import { setObjects } from '@forge/teamwork-graph';
+Use the `graph` named export — do NOT destructure `setObjects` directly:
 
-const result = await setObjects({
+```javascript
+const { graph } = require('@forge/teamwork-graph');
+
+const result = await graph.setObjects({
+  connectionId,          // required — the connectionId from the handler request
   objects: [
     {
-      externalId: 'unique-id-from-source',    // must be unique per connectionId
-      objectType: 'atlassian:document',
-      name: 'My Document Title',
+      schemaVersion: '1.0',
+      id: 'unique-id-from-source',      // unique per connectionId
+      updateSequenceNumber: 1,
+      displayName: 'My Document Title',
       url: 'https://source-system.example.com/doc/123',
-      createdAt: '2024-01-15T10:00:00Z',      // ISO 8601
-      lastModifiedAt: '2024-01-20T14:30:00Z',
-      properties: {                            // max 5 key-value pairs
-        author: 'Jane Smith',
-        department: 'Engineering',
+      createdAt: '2024-01-15T10:00:00Z',        // ISO 8601
+      lastUpdatedAt: '2024-01-20T14:30:00Z',
+      permissions: [{
+        accessControls: [{
+          principals: [{ type: 'EVERYONE' }],   // or restrict to specific users
+        }],
+      }],
+      'atlassian:document': {
+        type: {
+          category: 'DOCUMENT',   // see Document Categories table below
+          mimeType: 'application/vnd.google-apps.document',
+        },
+        content: {
+          mimeType: 'application/vnd.google-apps.document',
+          text: 'document title or snippet for search indexing',
+        },
       },
     },
   ],
 });
-// Check for rejections
-if (result.results.rejected.length > 0) {
-  console.error('Rejected objects:', JSON.stringify(result.results.rejected));
+
+if (!result.success) {
+  console.error('setObjects error:', result.error);
 }
 ```
 
 - Max **100 objects per call** — batch large datasets with a loop
-- `externalId` must be globally unique per connector connection; prefix with `connectionId` to avoid collisions
+- `id` must be unique per `connectionId`
+- `connectionId` is required in every `graph.setObjects()` call
 
-#### deleteObjectsByExternalId — remove objects
+#### Document Categories (for `atlassian:document.type.category`)
 
-```typescript
-import { deleteObjectsByExternalId } from '@forge/teamwork-graph';
-
-await deleteObjectsByExternalId({
-  objectType: 'atlassian:document',
-  externalIds: ['id-1', 'id-2'],  // max 100 per call
-});
-```
+| MIME type | Category |
+|---|---|
+| `application/vnd.google-apps.document` | `DOCUMENT` |
+| `application/vnd.google-apps.spreadsheet` | `SPREADSHEET` |
+| `application/vnd.google-apps.presentation` | `PRESENTATION` |
+| `application/vnd.google-apps.folder` | `FOLDER` |
+| `application/pdf` | `PDF` |
+| `image/*` | `IMAGE` |
+| `video/*` | `VIDEO` |
+| `audio/*` | `AUDIO` |
+| Other | `OTHER` |
 
 #### getObjectByExternalId — look up a single object
 
-```typescript
-import { getObjectByExternalId } from '@forge/teamwork-graph';
+```javascript
+const { graph } = require('@forge/teamwork-graph');
 
-const obj = await getObjectByExternalId({
+const data = await graph.getObjectByExternalId({
   externalId: 'unique-id-from-source',
   objectType: 'atlassian:document',
+  connectionId,
 });
+if (data.success) console.log(data.object);
 ```
 
 ### Step 4: Deploy and Install
@@ -193,9 +233,52 @@ After deployment, tell the user to:
 4. Fill in any configuration fields (if `formConfiguration` was defined)
 5. Click **Connect** — this triggers `onConnectionChange` with `action: CREATED` and starts data ingestion
 
+### Step 6: Monitor with forge tunnel
+
+Use `forge tunnel` during development to stream live logs directly to your terminal as the connector functions execute. This is the fastest way to catch errors in `onConnectionChangeHandler`, `validateConnectionHandler`, and `setObjects` calls without waiting for `forge logs`.
+
+Tell the user to run this in their own terminal (it requires an interactive session):
+
+```bash
+cd <app-directory>
+forge tunnel
+```
+
+With the tunnel active, any invocation of the connector functions (e.g. clicking "Connect" in Atlassian Admin, or triggering a scheduled re-ingestion) will stream output immediately. Look for:
+
+- `[connector] Fetched N items` — confirms `fetchExternalData()` ran
+- `[connector] Batch 1: N accepted, 0 rejected` — confirms `setObjects` succeeded
+- Any uncaught errors or thrown exceptions from `validateConnectionHandler`
+
+If the tunnel is not running, use `forge logs` instead to inspect past invocations:
+
+```bash
+# Most recent 50 log lines from development environment
+forge logs -e development --limit 50
+
+# Production logs for a specific site
+forge logs -e production --site <your-site> --limit 50
+```
+
+**Tunnel vs logs — when to use which:**
+
+| Situation | Use |
+|---|---|
+| Actively developing / testing the connection flow | `forge tunnel` — live streaming |
+| Debugging a past invocation or production issue | `forge logs` |
+| Connector function timed out before tunnel caught it | `forge logs` with `--limit 100` |
+
+> **Note:** `forge tunnel` must be run by the user in an interactive terminal — do not attempt to run it via the agent.
+
 ---
 
 ## Manifest Reference
+
+> **Key rules:**
+> - Scopes are `read:object:jira`, `write:object:jira`, `delete:object:jira` — NOT `read:graph:teamwork` / `write:graph:teamwork` (those fail `forge lint`)
+> - `function:` is declared **under `modules:`**, not at the top level
+> - Egress uses `address:` not a bare string (run `forge lint --fix` to auto-correct)
+> - `formConfiguration` uses `form: [{ type: header, properties: [...] }]` — NOT `fields:` or `beforeYouBegin:`
 
 ### Minimal connector (no admin config, no OAuth)
 
@@ -204,28 +287,34 @@ Use when the app operates entirely within Atlassian — no external credentials 
 ```yaml
 app:
   id: <generated-by-forge-create>
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
 
 permissions:
   scopes:
-    - read:graph:teamwork
-    - write:graph:teamwork
+    - read:object:jira
+    - write:object:jira
+    - delete:object:jira
+    - storage:app
 
 modules:
   graph:connector:
     - key: my-connector
       name: My Service
       icons:
-        24x24: https://cdn.example.com/logo-24.png
-        48x48: https://cdn.example.com/logo-48.png
+        light: https://cdn.example.com/logo.png
+        dark: https://cdn.example.com/logo.png
       objectTypes:
         - atlassian:document
       datasource:
         onConnectionChange:
           function: on-connection-change
 
-function:
-  - key: on-connection-change
-    handler: index.onConnectionChangeHandler
+  function:
+    - key: on-connection-change
+      handler: index.onConnectionChangeHandler
 ```
 
 ### Connector with admin form config (API key / URL)
@@ -235,99 +324,120 @@ Use when the admin must provide credentials to connect to an external system.
 ```yaml
 app:
   id: <generated-by-forge-create>
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
 
 permissions:
   scopes:
-    - read:graph:teamwork
-    - write:graph:teamwork
+    - read:object:jira
+    - write:object:jira
+    - delete:object:jira
+    - storage:app
   external:
     fetch:
       backend:
-        - 'https://api.your-service.com'
+        - address: 'https://api.your-service.com'   # note: address: not a bare string
 
 modules:
   graph:connector:
     - key: my-connector
       name: My Service
       icons:
-        24x24: https://cdn.example.com/logo-24.png
-        48x48: https://cdn.example.com/logo-48.png
+        light: https://cdn.example.com/logo.png
+        dark: https://cdn.example.com/logo.png
       objectTypes:
         - atlassian:document
       datasource:
         formConfiguration:
-          beforeYouBegin: |
-            Provide your My Service API credentials below.
-            You can find these in My Service → Settings → API.
-          fields:
-            - key: api-url
-              type: string
-              label: API URL
-              isRequired: true
-            - key: api-key
-              type: string
-              label: API Key
-              isRequired: true
+          form:                          # use form:, NOT fields: or beforeYouBegin:
+            - key: connectionDetails
+              type: header
+              title: Connection Details
+              description: >
+                Provide your My Service API credentials.
+                Find them in My Service → Settings → API.
+              properties:
+                - key: apiKey           # camelCase keys — accessed as request.configProperties.apiKey
+                  label: API Key
+                  type: string
+                  isRequired: true
+                - key: apiUrl
+                  label: API URL
+                  type: string
+                  isRequired: true
           validateConnection:
             function: validate-connection
         onConnectionChange:
           function: on-connection-change
 
-function:
-  - key: on-connection-change
-    handler: index.onConnectionChangeHandler
-  - key: validate-connection
-    handler: index.validateConnectionHandler
+  function:                              # function: is under modules:, NOT top-level
+    - key: on-connection-change
+      handler: index.onConnectionChangeHandler
+    - key: validate-connection
+      handler: index.validateConnectionHandler
 ```
 
 ---
 
 ## Handler Signatures
 
+> **Critical:** Forge passes the request **directly as the first argument** — it is NOT wrapped under `event.payload`. Config form values are at `request.configProperties`, not `event.payload.config`. Getting this wrong causes `TypeError: Cannot destructure property of undefined`.
+
 ### onConnectionChange
 
-```typescript
-export async function onConnectionChangeHandler(event: {
-  context: { cloudId: string; moduleKey: string };
-  payload: {
-    action: 'CREATED' | 'UPDATED' | 'DELETED';
-    connectionId: string;
-    config: Record<string, string>;  // matches your formConfiguration fields
-  };
-}) {
-  const { action, connectionId, config } = event.payload;
+```javascript
+const { kvs } = require('@forge/kvs');
+const { graph } = require('@forge/teamwork-graph');
+
+exports.onConnectionChangeHandler = async (request) => {
+  // request.action, request.connectionId, request.configProperties
+  const { action, connectionId, configProperties } = request;
 
   if (action === 'DELETED') {
-    // Atlassian removes Teamwork Graph data automatically.
-    // Only clean up your own local state (e.g. stored credentials).
-    await storage.delete(`conn:${connectionId}`);
-    return;
+    // Atlassian removes Teamwork Graph data automatically on disconnect.
+    // Only clean up locally stored credentials.
+    await kvs.deleteSecret(connectionId);
+    return { success: true };
   }
 
-  // CREATED or UPDATED — persist config and ingest data
-  await storage.set(`conn:${connectionId}`, config);
-  await ingestAllData(connectionId, config);
-}
+  // CREATED or UPDATED — persist credentials and ingest data
+  await kvs.setSecret(connectionId, configProperties);
+  await ingestAllData(connectionId, configProperties);
+  return { success: true };
+};
 ```
 
 ### validateConnection
 
-```typescript
-export async function validateConnectionHandler(event: {
-  context: { cloudId: string; moduleKey: string };
-  payload: { config: Record<string, string> };
-}) {
-  const { config } = event.payload;
+```javascript
+const { fetch } = require('@forge/api');
 
-  // Throw an Error to reject the connection with a user-visible message.
-  // Return (any value) to accept.
-  const response = await api.fetch(`${config['api-url']}/health`, {
-    headers: { Authorization: `Bearer ${config['api-key']}` },
-  });
+exports.validateConnectionHandler = async (request) => {
+  // request.configProperties — NOT event.payload.config
+  const { configProperties } = request;
+
+  // Return { success: false, message } to reject — do NOT throw an Error.
+  // Return { success: true } to accept.
+  const response = await fetch(`${configProperties['apiUrl']}/health`);
   if (!response.ok) {
-    throw new Error('Invalid API credentials. Please check your API URL and key.');
+    return { success: false, message: 'Invalid API credentials. Please check your settings.' };
   }
-}
+  return { success: true, message: 'Connection validated successfully.' };
+};
+```
+
+### refreshIngestion (scheduled trigger)
+
+```javascript
+exports.refreshIngestionHandler = async () => {
+  const activeConnections = await kvs.get('active-connections') ?? [];
+  for (const connectionId of activeConnections) {
+    const config = await kvs.getSecret(connectionId);
+    if (config) await ingestAllData(connectionId, config);
+  }
+};
 ```
 
 ---
@@ -379,27 +489,37 @@ To verify ingestion is working:
 
 ## Batching Pattern for Large Datasets
 
-```typescript
+```javascript
+const { graph } = require('@forge/teamwork-graph');
+
 const BATCH_SIZE = 100;
 
-async function ingestAllData(connectionId: string, config: Record<string, string>) {
+async function ingestAllData(connectionId, config) {
   const items = await fetchExternalData(config);
 
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
-    const result = await setObjects({
+    const result = await graph.setObjects({
+      connectionId,          // required in every call
       objects: batch.map(item => ({
-        externalId: `${connectionId}:${item.id}`,
-        objectType: 'atlassian:document',
-        name: item.title,
+        schemaVersion: '1.0',
+        id: item.id,                      // unique per connectionId
+        updateSequenceNumber: 1,
+        displayName: item.title,
         url: item.url,
         createdAt: item.createdAt,
-        lastModifiedAt: item.updatedAt,
-        properties: { source: config['api-url'] ?? 'external' },
+        lastUpdatedAt: item.updatedAt,
+        permissions: [{
+          accessControls: [{ principals: [{ type: 'EVERYONE' }] }],
+        }],
+        'atlassian:document': {
+          type: { category: 'DOCUMENT', mimeType: item.mimeType },
+          content: { mimeType: item.mimeType, text: item.title },
+        },
       })),
     });
-    if (result.results.rejected.length > 0) {
-      console.error('[connector] rejected objects:', JSON.stringify(result.results.rejected));
+    if (!result.success) {
+      console.error(`[connector] setObjects error in batch ${Math.floor(i / BATCH_SIZE) + 1}:`, result.error);
     }
   }
 }
@@ -423,15 +543,20 @@ scheduledTrigger:
     handler: index.refreshIngestionHandler
 ```
 
-```typescript
-export async function refreshIngestionHandler() {
-  // List all active connections from storage and re-ingest each
-  const connectionIds: string[] = await storage.get('active-connections') ?? [];
-  for (const connectionId of connectionIds) {
-    const config = await storage.get(`conn:${connectionId}`);
+```javascript
+const { kvs } = require('@forge/kvs');
+
+// Track active connections in onConnectionChangeHandler:
+//   await kvs.set('active-connections', [...activeConnections, connectionId]);
+//   await kvs.setSecret(connectionId, configProperties);  // store credentials securely
+
+exports.refreshIngestionHandler = async () => {
+  const activeConnections = await kvs.get('active-connections') ?? [];
+  for (const connectionId of activeConnections) {
+    const config = await kvs.getSecret(connectionId);  // retrieve stored credentials
     if (config) await ingestAllData(connectionId, config);
   }
-}
+};
 ```
 
 ---
@@ -451,17 +576,24 @@ The scaffold script is in this skill's directory. The deploy script is in the **
 
 ## Troubleshooting
 
+| Problem | Action |
+| --- | --- |
+| `graph:connector` not recognized in manifest | Confirm EAP enrollment; `forge lint` will show unknown module |
+| `TypeError: Cannot destructure property 'config' of 'event.payload'` | Handler using `event.payload.config` — change to `request.configProperties`. Forge passes request directly, not nested under `event.payload` |
+| `TypeError: Cannot read properties of undefined (reading 'set')` | Using `storage` from `@forge/storage` — switch to `kvs` from `@forge/kvs` |
+| `graph.setObjects is not a function` | Wrong import — use `const { graph } = require('@forge/teamwork-graph')` then call `graph.setObjects({ objects, connectionId })` |
+| `forge lint`: invalid scopes `read/write:graph:teamwork` | Replace with `read:object:jira`, `write:object:jira`, `delete:object:jira` |
+| `forge lint`: `document should NOT have additional property 'function'` | `function:` is at the top level — move it inside `modules:` |
+| `forge lint`: `formConfiguration must have required property 'form'` | Replace `fields:` / `beforeYouBegin:` with `form: [{ type: header, properties: [...] }]` |
+| `forge lint` warning: deprecated egress entries | Run `forge lint --fix` to auto-convert bare URL strings to `{ address: 'url' }` |
+| `forge developer-spaces list` command not found | Does not exist in Forge CLI 12.x. Have user run `forge create` interactively to select a developer space |
+| `forge create` fails with non-TTY error | `forge create` needs an interactive terminal — ask the user to run it; then write manifest and source files into the created directory |
+| `onConnectionChange` not triggered | Verify admin clicked "Connect" in Atlassian Administration → Connected apps; run `forge tunnel` to confirm the function fires |
+| Objects not appearing in Rovo Search | Wait ~5 minutes for indexing; run `forge logs -e development --since 15m` to check for `setObjects` errors |
+| 403 on `@forge/teamwork-graph` calls | Ensure `read:object:jira`, `write:object:jira`, `delete:object:jira` are in manifest scopes, then redeploy and `forge install --upgrade` |
+| `forge login` required | Create API token at https://id.atlassian.com/manage/api-tokens, then run `forge login` |
 
-| Problem                                      | Action                                                                                                                                      |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `graph:connector` not recognized in manifest | Confirm EAP enrollment; `forge lint` will show unknown module                                                                               |
-| `onConnectionChange` not triggered           | Verify admin clicked "Connect" in Atlassian Administration → Connected apps                                                                 |
-| Objects not appearing in Rovo Search         | Wait ~5 minutes for indexing; check `forge logs` for `setObjects` errors                                                                    |
-| `setObjects` returns rejected objects        | Check `objectType` is a valid value; check `externalId` uniqueness                                                                          |
-| 403 on `@forge/teamwork-graph` calls         | Ensure `read:graph:teamwork` and `write:graph:teamwork` scopes are in manifest, then redeploy and `forge install --upgrade`                 |
-| `forge create` fails                         | See forge-app-builder skill for error handling table                                                                                        |
-| `forge login` required                       | Create API token at [https://id.atlassian.com/manage/api-tokens](https://id.atlassian.com/manage/api-tokens), run `forge login` in terminal |
-
+---
 
 ---
 
