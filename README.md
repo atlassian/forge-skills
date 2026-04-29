@@ -14,6 +14,8 @@ The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the hos
 
 **Forge Debugger** (`skills/forge-debugger/`) supports systematic troubleshooting when something breaks: `forge` / deploy errors, resolver failures, blank or missing UI, scopes and permissions, and apps that “stopped working” in Jira or Confluence.
 
+**Forge Connector** (`skills/forge-connector/`) guides building `graph:connector` apps that ingest external data into Atlassian's Teamwork Graph, making it searchable in Rovo Search and surfaced in Rovo Chat.
+
 ### Forge MCP Server
 
 Gives your agent access to up-to-date Forge documentation, template registries, module configuration, manifest syntax, and UI Kit/backend API guides -- so its knowledge stays current rather than relying on training data.
@@ -28,6 +30,7 @@ Provides Atlassian Design System lookup for Custom UI apps: component discovery,
 | **Forge App Builder skill** | Scaffold, deploy, install, module choice, CLI workflows   | `forge create`, environments, cross-product scopes                     |
 | **Forge App Review skill**  | Pre-deploy review: security, cost, architecture, triggers | Audit before release, reduce invocations, find misconfigurations       |
 | **Forge Debugger skill**    | Diagnose deploy, runtime, UI, and permission issues       | Logs, blank panels, resolver errors, missing app in UI                 |
+| **Forge Connector skill**   | Ingest external data into Teamwork Graph / Rovo           | graph:connector, setObjects, Rovo Search, Rovo Chat                    |
 | **Forge MCP Server**        | Live Forge documentation and tooling                      | Template lookup, manifest syntax, UI Kit guides, backend API reference |
 | **ADS MCP Server**          | Atlassian Design System lookup                            | Component discovery, token reference, icon lookup (Custom UI only)     |
 
@@ -137,13 +140,14 @@ Once the plugin is installed, try prompts like these:
 ## What you get
 
 
-| Component             | Default location                                                                               | Purpose                                              |
-| --------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| **Forge App Builder** | `skills/forge-app-builder/`                                                                    | Create, deploy, install; helper scripts and tests    |
-| **Forge App Review**  | `skills/forge-app-review/`                                                                     | Pre-deploy review and audits (`SKILL.md`, README)    |
-| **Forge Debugger**    | `skills/forge-debugger/`                                                                       | Troubleshooting and diagnostics (`SKILL.md`, README) |
-| **MCP config**        | `.mcp.json`                                                                                    | Forge MCP Server and ADS MCP Server configuration    |
-| **Plugin manifests**  | `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `plugin.json`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring              |
+| Component             | Default location                                                                               | Purpose                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **Forge App Builder** | `skills/forge-app-builder/`                                                                    | Create, deploy, install; helper scripts and tests                              |
+| **Forge App Review**  | `skills/forge-app-review/`                                                                     | Pre-deploy review and audits (`SKILL.md`, README)                              |
+| **Forge Connector**   | `skills/forge-connector/`                                                                      | Build graph:connector apps; ingest data into Teamwork Graph (SKILL.md, README) |
+| **Forge Debugger**    | `skills/forge-debugger/`                                                                       | Troubleshooting and diagnostics (`SKILL.md`, README)                           |
+| **MCP config**        | `.mcp.json`                                                                                    | Forge MCP Server and ADS MCP Server configuration                              |
+| **Plugin manifests**  | `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `plugin.json`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring                                        |
 
 
 ## Authentication

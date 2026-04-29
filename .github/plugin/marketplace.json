@@ -12,7 +12,7 @@
     {
       "name": "forge-skills",
       "source": ".",
-      "description": "Forge-focused skills and MCP configuration for Atlassian Forge: scaffold and deploy apps (forge create, templates, dev spaces), pre-deploy review, systematic debugging, plus Forge docs and Atlassian Design System lookups via MCP.",
+      "description": "Forge-focused skills and MCP configuration for Atlassian Forge: scaffold and deploy apps (forge create, templates, dev spaces), build Teamwork Graph connectors for Rovo Search/Rovo Chat, pre-deploy review, systematic debugging, plus Forge docs and Atlassian Design System lookups via MCP.",
       "version": "0.1.0",
       "author": {
         "name": "Atlassian Developer"
@@ -31,7 +31,8 @@
       "skills": [
         "./skills/forge-app-builder",
         "./skills/forge-app-review",
-        "./skills/forge-debugger"
+        "./skills/forge-debugger",
+        "./skills/forge-connector"
       ]
     }
   ]
