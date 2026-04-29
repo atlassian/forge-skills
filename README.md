@@ -47,13 +47,9 @@ Before you install, make sure you have:
 
 ### Claude Code
 
-Add the marketplace, then install the plugin:
-
 ```
-/plugin marketplace add atlassian/forge-skills
 /plugin install forge-skills@atlassian-forge-skills
 ```
-_[Claude Marketplace](https://claude.com/plugins) support coming soon._
 ### Cursor
 
 The Cursor plugin needs to be installed locally. In your terminal run:
