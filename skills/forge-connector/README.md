@@ -1,6 +1,6 @@
 # Forge Connector Skill
 
-Build Atlassian Forge apps that ingest external data into the **Teamwork Graph**, making it searchable in **Rovo Search** and referenceable in **Rova Chat**.
+Build Atlassian Forge apps that ingest external data into the **Teamwork Graph**, making it searchable in **Rovo Search** and referenceable in **Rovo Chat**.
 
 ## What This Skill Does
 
@@ -15,7 +15,6 @@ Guides the agent through the full connector workflow:
 
 ## Prerequisites
 
-- **Forge Connector EAP** — you must be enrolled. [Express interest here](https://developer.atlassian.com/platform/forge/manifest-reference/modules/teamwork-graph-connector/).
 - **Node.js 22+** — `node -v`
 - **Forge CLI** — `npm install -g @forge/cli`
 - **Forge login** — `forge login`

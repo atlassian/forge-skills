@@ -14,7 +14,7 @@ The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the hos
 
 **Forge Debugger** (`skills/forge-debugger/`) supports systematic troubleshooting when something breaks: `forge` / deploy errors, resolver failures, blank or missing UI, scopes and permissions, and apps that “stopped working” in Jira or Confluence.
 
-**Forge Connector** (`skills/forge-connector/`) guides building `graph:connector` apps that ingest external data into Atlassian's Teamwork Graph, making it searchable in Rovo Search and surfaced in Rovo Chat. Requires Forge Connector EAP enrollment.
+**Forge Connector** (`skills/forge-connector/`) guides building `graph:connector` apps that ingest external data into Atlassian's Teamwork Graph, making it searchable in Rovo Search and surfaced in Rovo Chat.
 
 ### Forge MCP Server
 

@@ -4,11 +4,11 @@
 description: >
   Guides building and deploying Atlassian Forge Teamwork Graph connector apps that ingest
   external data into Atlassian's Teamwork Graph, making it searchable in Rovo Search and
-  surfaced in Rova Chat. Use when the user wants to build a Forge connector, ingest external
+  surfaced in Rovo Chat. Use when the user wants to build a Forge connector, ingest external
   data into Atlassian, connect a third-party tool (e.g. Google Drive, ServiceNow, Salesforce)
   to Atlassian, make external content searchable in Rovo, build a graph:connector module,
   use the @forge/teamwork-graph SDK, or implement onConnectionChange / validateConnection
-  functions. Requires Forge Connector EAP enrollment.
+  functions.
 license: Apache-2.0
 labels:
   - forge
@@ -17,28 +17,27 @@ labels:
   - atlassian
   - teamwork-graph
   - connector
-maintainer: amoore
+maintainer: mbanjan94
 namespace: cloud
 
 # Forge Connector
 
-Builds a `graph:connector` Forge app that ingests external data into Atlassian's Teamwork Graph so it appears in **Rovo Search** and **Rova Chat**.
+Builds a `graph:connector` Forge app that ingests external data into Atlassian's Teamwork Graph so it appears in **Rovo Search** and **Rovo Chat**.
 
 ## Critical Rules
 
-1. **EAP required** — The `graph:connector` module is gated behind the Forge Connector Early Access Program. If the user is not enrolled, direct them to [express interest](https://developer.atlassian.com/platform/forge/manifest-reference/modules/teamwork-graph-connector/). Do not proceed without EAP access.
-2. **Must install in Jira** — Apps using Teamwork Graph modules must be installed on a Jira site. Confluence-only installs will not work.
-3. **Never ask for credentials in chat** — Direct users to run `forge login` in their own terminal.
-4. **Always run the scaffold script yourself** — Do not only give manual instructions; run `scripts/scaffold_connector.py` to generate the boilerplate.
-5. **Always ask the user for their Atlassian site URL** when install is needed — never discover or guess it.
-6. **Atlassian deletes data on disconnect** — When `action = 'DELETED'`, the app only needs to clean up local state; Atlassian removes the Teamwork Graph data automatically.
-7. **Handler arguments are passed directly** — Forge passes the request object as the first argument to handlers, NOT nested under `event.payload`. Config values are at `request.configProperties`, NOT `event.payload.config`. This is the most common source of `TypeError: Cannot destructure property of undefined` errors.
-8. **Use `@forge/kvs` for storage** — Import `kvs` from `@forge/kvs`. Do NOT use `@forge/storage` — its `storage` export is `undefined` at runtime in connector functions.
-9. **Use `graph` named export from `@forge/teamwork-graph`** — The correct import is `const { graph } = require('@forge/teamwork-graph')`. Call `graph.setObjects({ objects, connectionId })`. Do NOT import `setObjects` as a named export directly.
-10. **`validateConnectionHandler` must return `{ success, message }`** — Do NOT throw an Error. Return `{ success: false, message: '...' }` to reject, `{ success: true }` to accept.
-11. **`function` declarations belong under `modules`** — In `manifest.yml`, `function:` is a key under `modules:`, not a top-level key. Placing it at the top level causes a lint error.
-12. **`formConfiguration` uses `form` array with `type: header`** — Do NOT use `fields:` or `beforeYouBegin:`. The correct format uses `form: [{ key, type: header, title, description, properties: [...] }]`.
-13. **Scopes are `read/write/delete:object:jira`** — Use `read:object:jira`, `write:object:jira`, `delete:object:jira`. The scopes `read:graph:teamwork` and `write:graph:teamwork` are invalid and will fail `forge lint`.
+1. **Must install in Jira** — Apps using Teamwork Graph modules must be installed on a Jira site. Confluence-only installs will not work.
+2. **Never ask for credentials in chat** — Direct users to run `forge login` in their own terminal.
+3. **Always run the scaffold script yourself** — Do not only give manual instructions; run `scripts/scaffold_connector.py` to generate the boilerplate.
+4. **Always ask the user for their Atlassian site URL** when install is needed — never discover or guess it.
+5. **Atlassian deletes data on disconnect** — When `action = 'DELETED'`, the app only needs to clean up local state; Atlassian removes the Teamwork Graph data automatically.
+6. **Handler arguments are passed directly** — Forge passes the request object as the first argument to handlers, NOT nested under `event.payload`. Config values are at `request.configProperties`, NOT `event.payload.config`. This is the most common source of `TypeError: Cannot destructure property of undefined` errors.
+7. **Use `@forge/kvs` for storage** — Import `kvs` from `@forge/kvs`. Do NOT use `@forge/storage` — its `storage` export is `undefined` at runtime in connector functions.
+8. **Use `graph` named export from `@forge/teamwork-graph`** — The correct import is `const { graph } = require('@forge/teamwork-graph')`. Call `graph.setObjects({ objects, connectionId })`. Do NOT import `setObjects` as a named export directly.
+9. **`validateConnectionHandler` must return `{ success, message }`** — Do NOT throw an Error. Return `{ success: false, message: '...' }` to reject, `{ success: true }` to accept.
+10. **`function` declarations belong under `modules`** — In `manifest.yml`, `function:` is a key under `modules:`, not a top-level key. Placing it at the top level causes a lint error.
+11. **`formConfiguration` uses `form` array with `type: header`** — Do NOT use `fields:` or `beforeYouBegin:`. The correct format uses `form: [{ key, type: header, title, description, properties: [...] }]`.
+12. **Scopes are `read/write/delete:object:jira`** — Use `read:object:jira`, `write:object:jira`, `delete:object:jira`. The scopes `read:graph:teamwork` and `write:graph:teamwork` are invalid and will fail `forge lint`.
 
 ## MCP Prerequisites
 
@@ -444,7 +443,7 @@ exports.refreshIngestionHandler = async () => {
 
 ## Object Types
 
-Objects in **bold** are indexed in Rovo Search and Rova Chat.
+Objects in **bold** are indexed in Rovo Search and Rovo Chat.
 
 
 | Object Type                       | Indexed in Rovo | Best for                             |
@@ -471,12 +470,12 @@ Objects in **bold** are indexed in Rovo Search and Rova Chat.
 
 ---
 
-## Rovo Search / Rova Chat Surfacing
+## Rovo Search / Rovo Chat Surfacing
 
 Once ingested:
 
 - Objects appear in **Rovo Search** under a subfilter named after the connector's nickname (set by admin at connection time)
-- **Rova Chat** can reference and cite connector objects in responses when queried about topics related to the ingested content
+- **Rovo Chat** can reference and cite connector objects in responses when queried about topics related to the ingested content
 - Data is not available immediately — allow a few minutes for indexing after `onConnectionChange` fires
 
 To verify ingestion is working:
@@ -578,7 +577,7 @@ The scaffold script is in this skill's directory. The deploy script is in the **
 
 | Problem | Action |
 | --- | --- |
-| `graph:connector` not recognized in manifest | Confirm EAP enrollment; `forge lint` will show unknown module |
+| `graph:connector` not recognized in manifest | Run `forge lint` — it will identify the exact field causing the error |
 | `TypeError: Cannot destructure property 'config' of 'event.payload'` | Handler using `event.payload.config` — change to `request.configProperties`. Forge passes request directly, not nested under `event.payload` |
 | `TypeError: Cannot read properties of undefined (reading 'set')` | Using `storage` from `@forge/storage` — switch to `kvs` from `@forge/kvs` |
 | `graph.setObjects is not a function` | Wrong import — use `const { graph } = require('@forge/teamwork-graph')` then call `graph.setObjects({ objects, connectionId })` |

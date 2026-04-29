@@ -402,7 +402,7 @@ def main():
         sys.exit(1)
 
     if args.object_type not in ROVO_INDEXED_TYPES:
-        print(f"⚠️  Note: '{args.object_type}' is NOT indexed in Rovo Search / Rova Chat.")
+        print(f"⚠️  Note: '{args.object_type}' is NOT indexed in Rovo Search / Rovo Chat.")
         print("   Objects will still be stored in Teamwork Graph but won't appear in search results.")
 
     if not check_prerequisites():
