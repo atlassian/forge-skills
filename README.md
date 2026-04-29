@@ -49,14 +49,14 @@ Before you install, make sure you have:
 ```
 ### Cursor
 
-The Cursor plugin needs to be installed locally. In your terminal run:
+The Forge Skills plugin can be installed directly from the [Cursor Marketplace](https://cursor.com/marketplace/atlassian/forge-skills)
+
+Or by running the following command in chat with a Cursor agent: 
 
 ```
-cd ~/.cursor/plugins/local
-git clone https://github.com/atlassian/forge-skills.git
+/add-plugin forge-skills
 ```
 
-_[Cursor Marketplace](https://cursor.com/marketplace) support coming soon._
 
 ### Gemini CLI
 
