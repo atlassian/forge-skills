@@ -31,6 +31,7 @@
       "skills": [
         "./skills/forge-app-builder",
         "./skills/forge-app-review",
+        "./skills/forge-cost-optimizer",
         "./skills/forge-debugger",
         "./skills/forge-connector"
       ]

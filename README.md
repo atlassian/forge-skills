@@ -12,6 +12,8 @@ The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the hos
 
 **Forge App Review** (`skills/forge-app-review/`) supports pre-deploy review and audits: security, architecture, cost and invocation efficiency, performance, and trigger or scheduling waste.
 
+**Forge Cost Optimizer** (`skills/forge-cost-optimizer/`) helps agents audit and implement lower-cost Forge patterns: reduce invocations and GB-seconds, move safe work to the frontend, tune triggers and memory, reduce KVS writes, trim logs, batch API calls, and evaluate Forge Remote trade-offs.
+
 **Forge Debugger** (`skills/forge-debugger/`) supports systematic troubleshooting when something breaks: `forge` / deploy errors, resolver failures, blank or missing UI, scopes and permissions, and apps that “stopped working” in Jira or Confluence.
 
 **Forge Connector** (`skills/forge-connector/`) guides building `graph:connector` apps that ingest external data into Atlassian's Teamwork Graph, making it searchable in Rovo Search and surfaced in Rovo Chat.
@@ -29,6 +31,7 @@ Provides Atlassian Design System lookup for Custom UI apps: component discovery,
 | --------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
 | **Forge App Builder skill** | Scaffold, deploy, install, module choice, CLI workflows   | `forge create`, environments, cross-product scopes                     |
 | **Forge App Review skill**  | Pre-deploy review: security, cost, architecture, triggers | Audit before release, reduce invocations, find misconfigurations       |
+| **Forge Cost Optimizer skill** | Cost optimization workflow for Forge apps               | Reduce invocations, KVS writes, log volume, API calls, GB-seconds      |
 | **Forge Debugger skill**    | Diagnose deploy, runtime, UI, and permission issues       | Logs, blank panels, resolver errors, missing app in UI                 |
 | **Forge Connector skill**   | Ingest external data into Teamwork Graph / Rovo           | graph:connector, setObjects, Rovo Search, Rovo Chat                    |
 | **Forge MCP Server**        | Live Forge documentation and tooling                      | Template lookup, manifest syntax, UI Kit guides, backend API reference |
@@ -135,6 +138,7 @@ Once the plugin is installed, try prompts like these:
 - `Deploy my Forge app to my staging site.`
 - `What scopes do I need for a Confluence app that also reads Jira data?`
 - `Review my Forge app for cost and security before production.`
+- `Optimize this Forge app to reduce invocations and KVS writes.`
 - `forge deploy fails with [error] -- what should I check?`
 
 ## What you get
@@ -144,6 +148,7 @@ Once the plugin is installed, try prompts like these:
 | --------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | **Forge App Builder** | `skills/forge-app-builder/`                                                                    | Create, deploy, install; helper scripts and tests                              |
 | **Forge App Review**  | `skills/forge-app-review/`                                                                     | Pre-deploy review and audits (`SKILL.md`, README)                              |
+| **Forge Cost Optimizer** | `skills/forge-cost-optimizer/`                                                              | Cost optimization audits and implementation guidance (`SKILL.md`, README)      |
 | **Forge Connector**   | `skills/forge-connector/`                                                                      | Build graph:connector apps; ingest data into Teamwork Graph (SKILL.md, README) |
 | **Forge Debugger**    | `skills/forge-debugger/`                                                                       | Troubleshooting and diagnostics (`SKILL.md`, README)                           |
 | **MCP config**        | `.mcp.json`                                                                                    | Forge MCP Server and ADS MCP Server configuration                              |
