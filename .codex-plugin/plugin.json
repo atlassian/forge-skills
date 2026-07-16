@@ -6,5 +6,22 @@
     "name": "Atlassian Labs"
   },
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Forge Skills",
+    "shortDescription": "Build, review, secure, optimize, and debug Atlassian Forge apps.",
+    "longDescription": "Forge development skills with MCP-backed guidance for creating, extending, reviewing, securing, optimizing, deploying, and debugging Atlassian Forge apps.",
+    "developerName": "Atlassian Labs",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Forge app development",
+      "MCP-backed Forge documentation",
+      "Atlassian Design System guidance"
+    ],
+    "defaultPrompt": [
+      "Build a Forge app for Jira or Confluence.",
+      "Extend an existing Forge app with a new feature.",
+      "Review and debug my Forge app."
+    ]
+  }
 }
