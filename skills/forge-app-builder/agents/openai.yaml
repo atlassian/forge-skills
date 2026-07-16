@@ -1,0 +1,15 @@
+interface:
+  display_name: "Forge App Builder"
+  short_description: "Build and extend Atlassian Forge apps"
+  default_prompt: "Use $forge-app-builder to build or extend an Atlassian Forge app using current Forge documentation."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "forge"
+      description: "Official Atlassian Forge documentation and development guidance"
+      transport: "streamable_http"
+      url: "https://mcp.atlassian.com/v1/forge/mcp"
+
+policy:
+  allow_implicit_invocation: true
