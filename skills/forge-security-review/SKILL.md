@@ -6,14 +6,10 @@ description: >
   review, security audit, vuln assessment, pentest-style code review, authz review, tenant
   isolation analysis, web trigger hardening, or static analysis execution for a Forge app.
 license: Apache-2.0
-labels:
-  - forge
-  - security
-  - review
-  - audit
-  - atlassian
-maintainer: atlassian-developer
-namespace: cloud
+metadata:
+  labels: "forge,security,review,audit,atlassian"
+  maintainer: atlassian-developer
+  namespace: cloud
 ---
 
 # Forge Security Review

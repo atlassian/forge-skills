@@ -93,12 +93,24 @@ codex plugin add forge-skills@atlassian-forge-skills
 
 Start a new Codex thread after installing so the Forge skills and MCP servers are loaded.
 
-To refresh the marketplace after updates:
+To refresh the Codex marketplace after updates:
 
 ```bash
 codex plugin marketplace upgrade atlassian-forge-skills
 codex plugin add forge-skills@atlassian-forge-skills
 ```
+
+### Kiro and Agent Plugins clients
+
+This repository follows the [Agent Plugins v1.0.0 specification](https://agent-plugins.org/). In Kiro, open the Powers panel, choose **Add Custom Power**, and import this repository from GitHub or from a local checkout.
+
+Portable clients discover:
+
+- `plugin.json` for plugin identity and metadata
+- `skills/*/SKILL.md` for Agent Skills
+- `mcp.json` for Forge and Atlassian Design System MCP servers
+
+The separate `.mcp.json` and client-specific manifest directories remain in place for clients that use their own plugin formats.
 
 ### Rovo Dev
 
@@ -177,12 +189,12 @@ Once the plugin is installed, try prompts like these:
 | ------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | **Forge App Builder**     | `skills/forge-app-builder/`                                                                    | Create, deploy, install; helper scripts and tests                              |
 | **Forge App Review**      | `skills/forge-app-review/`                                                                     | Pre-deploy review and audits (`SKILL.md`, README)                              |
-| **Forge Cost Optimizer**  | `skills/forge-cost-optimizer/`                                                                | Reduce Forge platform consumption across invocations, storage, logs, and memory |
+| **Forge Cost Optimizer**  | `skills/forge-cost-optimizer/`                                                                 | Reduce Forge platform consumption across invocations, storage, logs, and memory |
 | **Forge Connector**       | `skills/forge-connector/`                                                                      | Build graph:connector apps; ingest data into Teamwork Graph (SKILL.md, README) |
 | **Forge Debugger**        | `skills/forge-debugger/`                                                                       | Troubleshooting and diagnostics (`SKILL.md`, README)                           |
 | **Forge Security Review** | `skills/forge-security-review/`                                                                | White-box security audits with rule assets (`SKILL.md`, README, assets/)       |
-| **MCP config**            | `.mcp.json`                                                                                    | Forge MCP Server and ADS MCP Server configuration                              |
-| **Plugin manifests**      | `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `plugin.json`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring                                        |
+| **MCP config**            | `mcp.json`, `.mcp.json`                                                                        | Forge MCP Server and ADS MCP Server configuration                    |
+| **Plugin manifests**      | `plugin.json`, `.plugin/`, `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring                 |
 
 ## Authentication
 
