@@ -40,6 +40,12 @@ Builds a `graph:connector` Forge app that ingests external data into Atlassian's
 11. **`formConfiguration` uses `form` array with `type: header`** — Do NOT use `fields:` or `beforeYouBegin:`. The correct format uses `form: [{ key, type: header, title, description, properties: [...] }]`.
 12. **Scopes are `read/write/delete:object:jira`** — Use `read:object:jira`, `write:object:jira`, `delete:object:jira`. The scopes `read:graph:teamwork` and `write:graph:teamwork` are invalid and will fail `forge lint`.
 13. **Set `ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-connector` on `forge` commands run for this skill** — prefix `forge` invocations with this env var: ones you run in the shell (e.g. `forge lint`, `forge logs`, `forge deploy`) **and the interactive `forge create` command you hand the user as a fallback**. The bundled scripts set it automatically; other commands shown in this skill omit it for brevity — add it when you run them. The only exclusions are `forge login` and `forge tunnel` (user-run auth / live-dev commands).
+14. **Never ignore `setObjects` / `setUsers` / `setGroups` responses** — Do NOT treat ingestion calls as fire-and-forget. Always check both `response.success` **and** `response.results?.rejected`. A call can partially fail: some objects are rejected while others are accepted, and `response.success` can be `true` even when `rejected.length > 0`.
+15. **Keep access control IDs consistent** — When using `USER` or `GROUP` principals in `permissions`, the `id` value must exactly match the `externalId` used in the corresponding `graph.setUsers()` / `graph.setGroups()` call. Mismatched IDs (e.g. `user-42` vs `accountId:user-42`) silently make objects invisible to users who should have access.
+16. **Use orchestration for refresh scheduling** — When the user wants periodic re-ingestion, use `graph.scheduleOrUpdateTask` + a `taskRunner` handler (the platform-managed approach) instead of a `scheduledTrigger`. Orchestration handles cadence, retry, and fan-out natively. Only fall back to `scheduledTrigger` if the user explicitly needs a lightweight cron-style trigger without platform task tracking.
+17. **`taskId` must be a valid UUID** — Both `scheduleOrUpdateTask` and `scheduleChildTask` require `task.taskId` to be a UUID string. Use `uuid()` (v4) for root tasks and `uuidv5('<scanId>:<parentTaskId>:<itemId>', APP_NAMESPACE)` for child tasks. Persist root task IDs in KVS so re-running `onConnectionChange` reuses the same ID (making it an update, not a competing schedule).
+18. **Write `TaskInfo` to KVS before scheduling; never delete it on completion** — Always write the `TaskInfo` record to KVS keyed by `taskId` before calling `scheduleOrUpdateTask` or `scheduleChildTask`. On success, set `completed: true` on the record — do NOT delete it. Deleting causes duplicate deliveries to report `ENTITY_NOT_FOUND` and overwrite the earlier success.
+19. **Branch on `response.error` for orchestration responses** — `scheduleOrUpdateTask` and `scheduleChildTask` return `{ status: 'ACCEPTED' }` on success, not `{ success: true }`. Check `if (response.error)` to detect failures — do NOT check `if (!response.success)`.
 
 ## MCP Prerequisites
 
@@ -114,9 +120,16 @@ The `--dev-space-id` flag in the scaffold script is optional and can be omitted 
    No (data comes entirely from within Atlassian) → omit the flag.
 
 5. **How often does the source data change?**
-   Frequently (hourly) → plan a `scheduledTrigger` with `interval: hour`.
-   Daily or less → `interval: day`.
-   Static / one-off → no scheduled trigger needed.
+   This determines the sync cadence. Use **orchestration** (`scheduleOrUpdateTask` + `taskRunner`) for all platform-managed refresh — it handles cadence, retry, and fan-out natively. Only use the legacy `scheduledTrigger` approach if you explicitly need a lightweight cron with no task tracking.
+
+   | Frequency | Orchestration interval |
+   |---|---|
+   | Hourly | `scheduleInterval: { value: 1, timeUnit: 'hour' }` |
+   | Daily | `scheduleInterval: { value: 1, timeUnit: 'day' }` |
+   | Every N minutes (1–60) | `scheduleInterval: { value: N, timeUnit: 'minute' }` |
+   | Static / one-off | No scheduled refresh needed — ingest once in `onConnectionChange` |
+
+   Record the chosen interval before proceeding to Step 2.
 
 6. **Who should be able to see the ingested content in Rovo Search?**
    This determines the `permissions.accessControls` on each object. Ask:
@@ -203,8 +216,8 @@ const result = await graph.setObjects({
       lastUpdatedAt: '2024-01-20T14:30:00Z',
       // Use the permission model chosen in Step 1.5 question 6.
       // EVERYONE only if content is confirmed publicly accessible.
-      // For user-restricted content: { type: 'user', id: '<atlassian-account-id>' }
-      // For group-restricted content: { type: 'group', id: '<group-id>' }
+      // For user-restricted content: { type: 'USER', id: '<externalId from setUsers>' }
+      // For group-restricted content: { type: 'GROUP', id: '<externalId from setGroups>' }
       permissions: [{
         accessControls: [{
           principals: [{ type: 'EVERYONE' }],
@@ -224,8 +237,16 @@ const result = await graph.setObjects({
   ],
 });
 
-if (!result.success) {
-  console.error('setObjects error:', result.error);
+// Always check both success AND rejected — a call can partially fail.
+const rejected = result.results?.rejected ?? [];
+if (!result.success || rejected.length > 0) {
+  console.error('setObjects ingestion failed', {
+    connectionId,
+    acceptedCount: result.results?.accepted?.length ?? 0,
+    rejectedCount: rejected.length,
+    rejected,
+    error: result.error,
+  });
 }
 ```
 
@@ -450,6 +471,10 @@ modules:
   graph:connector:
     - key: my-connector
       name: My Service
+      capabilities:
+        replicatesPermissions: false  # true if mirroring source-system ACLs into Teamwork Graph
+        syncFidelity: mirror          # append | upsert | mirror (mirror is recommended)
+        supportsIncrementalSync: false
       icons:
         light: https://cdn.example.com/logo.png
         dark: https://cdn.example.com/logo.png
@@ -464,10 +489,44 @@ modules:
       handler: index.onConnectionChangeHandler
 ```
 
+### Connector with orchestration (platform-managed refresh)
+
+Add an `orchestration.taskRunner` block to any connector variant to enable platform-managed periodic re-ingestion. Wire it alongside your existing `onConnectionChange` handler.
+
+```yaml
+modules:
+  graph:connector:
+    - key: my-connector
+      name: My Service
+      capabilities:
+        replicatesPermissions: false
+        syncFidelity: mirror
+        supportsIncrementalSync: false
+      icons:
+        light: https://cdn.example.com/logo.png
+        dark: https://cdn.example.com/logo.png
+      objectTypes:
+        - atlassian:document
+      orchestration:
+        taskRunner:
+          function: task-runner-fn     # references the function key below
+      datasource:
+        onConnectionChange:
+          function: on-connection-change
+
+  function:
+    - key: on-connection-change
+      handler: index.onConnectionChangeHandler
+    - key: task-runner-fn
+      handler: index.taskRunner
+      timeoutSeconds: 900             # optional: extend to 15 min for large datasets
+```
+
+> `timeoutSeconds` is only valid on a function referenced by a consumer module (like `orchestration.taskRunner`). Setting it on an unreferenced function fails manifest validation.
+
 ### Connector with admin form config (API key / URL)
 
 Use when the admin must provide credentials to connect to an external system.
-
 ```yaml
 app:
   id: <generated-by-forge-create>
@@ -491,6 +550,10 @@ modules:
   graph:connector:
     - key: my-connector
       name: My Service
+      capabilities:
+        replicatesPermissions: false  # true if mirroring source-system ACLs into Teamwork Graph
+        syncFidelity: mirror          # append | upsert | mirror (mirror is recommended)
+        supportsIncrementalSync: false
       icons:
         light: https://cdn.example.com/logo.png
         dark: https://cdn.example.com/logo.png
@@ -645,6 +708,7 @@ async function ingestAllData(connectionId, config) {
   const items = await fetchExternalData(config);
 
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     const batch = items.slice(i, i + BATCH_SIZE);
     const result = await graph.setObjects({
       connectionId,          // required in every call
@@ -656,7 +720,8 @@ async function ingestAllData(connectionId, config) {
         url: item.url,
         createdAt: item.createdAt,
         lastUpdatedAt: item.updatedAt,
-        // Replace with user/group principals if source system has access controls.
+        // Replace with USER/GROUP principals if source system has access controls.
+        // The id must exactly match the externalId used in graph.setUsers() / graph.setGroups().
         permissions: [{
           accessControls: [{ principals: [{ type: 'EVERYONE' }] }],
         }],
@@ -666,8 +731,19 @@ async function ingestAllData(connectionId, config) {
         },
       })),
     });
-    if (!result.success) {
-      console.error(`[connector] setObjects error in batch ${Math.floor(i / BATCH_SIZE) + 1}:`, result.error);
+
+    // Always check both success AND rejected — a call can partially fail.
+    const rejected = result.results?.rejected ?? [];
+    if (!result.success || rejected.length > 0) {
+      console.error(`[connector] setObjects batch ${batchNum} failed`, {
+        connectionId,
+        acceptedCount: result.results?.accepted?.length ?? 0,
+        rejectedCount: rejected.length,
+        rejected,
+        error: result.error,
+      });
+    } else {
+      console.log(`[connector] Batch ${batchNum}: ${result.results?.accepted?.length ?? batch.length} accepted, 0 rejected`);
     }
   }
 }
@@ -675,9 +751,183 @@ async function ingestAllData(connectionId, config) {
 
 ---
 
-## Scheduled Re-Ingestion (optional)
+## Orchestrated Re-Ingestion (recommended)
 
-To keep data fresh, add a scheduled trigger that re-runs ingestion periodically:
+Use orchestration when the user selects a refresh schedule. The platform invokes `taskRunner` on the configured cadence per connection — no external scheduler needed. See [Orchestration concepts](https://developer.atlassian.com/platform/teamwork-graph/orchestration-concepts/) for the full reference.
+
+Install the `uuid` package for task ID generation:
+
+```bash
+npm install uuid
+```
+
+### Three IDs you receive in every `taskRunner` invocation
+
+| ID | Lifetime | Use |
+|---|---|---|
+| `taskId` | Stable across invocations of a root task | KVS key for `TaskInfo` |
+| `scanId` | One per scheduled run of a root task | Pass unchanged to `updateTaskStatus`; threads through all children |
+| `taskExecutionId` | Unique per invocation attempt | Pass unchanged to `updateTaskStatus` |
+
+### `onConnectionChange` — schedule the root task
+
+Call `scheduleOrUpdateTask` on both `CREATED` and `UPDATED`. Reusing the same `taskId` makes the call an in-place update of the existing schedule.
+
+```javascript
+const { graph, types } = require('@forge/teamwork-graph');
+const { kvs } = require('@forge/kvs');
+const { v4: uuid } = require('uuid');
+
+exports.onConnectionChangeHandler = async (request) => {
+  const { action, connectionId, configProperties } = request;
+
+  if (action === 'DELETED') {
+    await kvs.deleteSecret(connectionId);
+    await kvs.delete(`rootTaskId:${connectionId}`);
+    // TaskInfo rows for in-flight tasks are cleaned up here or in a maintenance pass.
+    return { success: true };
+  }
+
+  await kvs.setSecret(connectionId, configProperties);
+
+  // Mint once, reuse on UPDATED — same taskId makes scheduleOrUpdateTask an update.
+  let rootTaskId = await kvs.get(`rootTaskId:${connectionId}`);
+  if (!rootTaskId) {
+    rootTaskId = uuid();
+    await kvs.set(`rootTaskId:${connectionId}`, rootTaskId);
+  }
+
+  // Write TaskInfo BEFORE scheduling (taskRunner reads this to dispatch).
+  await kvs.set(`taskInfo:${rootTaskId}`, {
+    taskType: types.FORGE_TASK_TYPES.ENTITY_INGESTION_FULL,
+    connectionId,
+    createdAt: new Date().toISOString(),
+  });
+
+  const response = await graph.scheduleOrUpdateTask({
+    connectionId,
+    task: {
+      taskId: rootTaskId,
+      taskType: types.FORGE_TASK_TYPES.ENTITY_INGESTION_FULL,
+      scheduleInterval: { value: 1, timeUnit: 'day' }, // value: 1–60; timeUnit: minute|hour|day
+    },
+  });
+
+  // Branch on response.error — NOT response.success (orchestration responses don't set a boolean success field).
+  if (response.error) {
+    console.error('[connector] scheduleOrUpdateTask failed:', response.error);
+    return { success: false, message: response.error };
+  }
+
+  return { success: true };
+};
+```
+
+### `taskRunner` — run ingestion with idempotency
+
+```javascript
+exports.taskRunner = async (request) => {
+  const { taskId, scanId, taskExecutionId, connectionId } = request;
+
+  // Read TaskInfo — dispatch key and idempotency state.
+  const taskInfo = await kvs.get(`taskInfo:${taskId}`);
+  if (!taskInfo) {
+    await graph.updateTaskStatus({
+      scanId, taskExecutionId, connectionId,
+      status: 'failure',
+      failureReason: 'ENTITY_NOT_FOUND',
+      task: { taskId },
+    });
+    return { success: false, message: 'Task not found' };
+  }
+
+  // Short-circuit duplicate deliveries — the platform delivers at-least-once.
+  if (taskInfo.completed) {
+    await graph.updateTaskStatus({ scanId, taskExecutionId, connectionId, status: 'success', task: { taskId } });
+    return { success: true, message: 'Already completed (duplicate delivery)' };
+  }
+
+  try {
+    const config = await kvs.getSecret(connectionId);
+    await ingestAllData(connectionId, config);
+
+    // Mark completed BEFORE updateTaskStatus so a crash between the two
+    // doesn't cause a duplicate invocation to re-run the full pipeline.
+    await kvs.set(`taskInfo:${taskId}`, { ...taskInfo, completed: true });
+    await graph.updateTaskStatus({ scanId, taskExecutionId, connectionId, status: 'success', task: { taskId } });
+    return { success: true };
+  } catch (err) {
+    console.error('[connector] taskRunner failed:', err);
+    await graph.updateTaskStatus({
+      scanId, taskExecutionId, connectionId,
+      status: 'failure',
+      failureReason: 'INTERNAL_ERROR',
+      task: { taskId },
+    });
+    return { success: false, message: err.message };
+  }
+};
+```
+
+### Task types (`types.FORGE_TASK_TYPES`)
+
+`taskType` is a closed enum — use the SDK constants, never raw strings.
+
+```javascript
+const { types } = require('@forge/teamwork-graph');
+
+types.FORGE_TASK_TYPES.ENTITY_INGESTION_FULL          // full re-sync of objects
+types.FORGE_TASK_TYPES.ENTITY_INGESTION_INCREMENTAL   // delta sync (changes only)
+types.FORGE_TASK_TYPES.USER_INGESTION_FULL
+types.FORGE_TASK_TYPES.USER_INGESTION_INCREMENTAL
+types.FORGE_TASK_TYPES.GROUP_INGESTION_FULL
+types.FORGE_TASK_TYPES.GROUP_INGESTION_INCREMENTAL
+types.FORGE_TASK_TYPES.RELATIONSHIP_INGESTION_FULL
+types.FORGE_TASK_TYPES.RELATIONSHIP_INGESTION_INCREMENTAL
+```
+
+### Fan-out with child tasks (large datasets)
+
+For large datasets, fan out from the root `taskRunner` into per-item children. Use deterministic UUIDs (`uuidv5`) for child tasks so duplicate deliveries resolve to the same `TaskInfo` row.
+
+```javascript
+const { v5: uuidv5 } = require('uuid');
+
+const APP_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // any stable UUID
+
+// Inside taskRunner, after fetching item list:
+for (const item of items) {
+  const childTaskId = uuidv5(`${scanId}:${taskId}:${item.id}`, APP_NAMESPACE);
+
+  await kvs.set(`taskInfo:${childTaskId}`, {
+    taskType: types.FORGE_TASK_TYPES.ENTITY_INGESTION_FULL,
+    connectionId,
+    createdAt: new Date().toISOString(),
+    metadata: { itemId: item.id },
+  });
+
+  const response = await graph.scheduleChildTask({
+    connectionId,
+    scanId,          // must be the current scan's scanId
+    task: {
+      taskId: childTaskId,
+      taskType: types.FORGE_TASK_TYPES.ENTITY_INGESTION_FULL,
+    },
+  });
+
+  if (response.error) {
+    console.error('[connector] scheduleChildTask failed:', response.error);
+  }
+}
+```
+
+---
+
+## Scheduled Re-Ingestion (legacy — prefer orchestration)
+
+> **Prefer orchestration** (the section above) when the user wants platform-managed periodic sync. Use `scheduledTrigger` only for simple cron-style triggers where platform task tracking is not needed.
+
+To keep data fresh with a basic scheduled trigger:
 
 ```yaml
 # In manifest.yml — under modules:
@@ -722,6 +972,68 @@ The scaffold script is in this skill's directory. The deploy script is in the **
 
 ---
 
+## Development Best Practices
+
+Follow these practices to avoid common issues. See the [official connector requirements](https://developer.atlassian.com/platform/teamwork-graph/connector-requirements-and-best-practices/#development-best-practices) for the full guide.
+
+### Do not ignore ingestion errors
+
+Always inspect the response from `setObjects`, `setUsers`, or `setGroups`. A call can fail completely **or partially reject individual items** — and `response.success` may be `true` even when some objects were rejected.
+
+```javascript
+const response = await graph.setObjects({ connectionId, objects });
+
+const rejected = response.results?.rejected ?? [];
+if (!response.success || rejected.length > 0) {
+  console.error('Teamwork Graph object ingestion failed', {
+    connectionId,
+    acceptedCount: response.results?.accepted?.length ?? 0,
+    rejectedCount: rejected.length,
+    rejected,
+    error: response.error,
+  });
+}
+```
+
+### Keep access control IDs consistent
+
+When using `USER` or `GROUP` principals in object `permissions`, always ingest the corresponding users or groups first via `graph.setUsers()` / `graph.setGroups()`. The `id` in `accessControls` must be the **exact same string** as the `externalId` passed to those calls. Mismatched IDs silently make objects invisible to users who should have access.
+
+```javascript
+// Ingest user with externalId 'user-42'
+await graph.setUsers({ connectionId, users: [{ externalId: 'user-42', displayName: 'Alex Chen', emails: [{ value: 'alex@example.com', primary: true }] }] });
+
+// Use the same ID 'user-42' in accessControls — NOT 'accountId:user-42' or any other variant
+await graph.setObjects({
+  connectionId,
+  objects: [{
+    // ...
+    permissions: [{ accessControls: [{ principals: [{ type: 'USER', id: 'user-42' }] }] }],
+  }],
+});
+```
+
+### Declare capabilities
+
+Add a `capabilities` block to the `graph:connector` module. Without it, admins see _"Capabilities not declared by developer"_ on the configuration screen, which reduces confidence. Set values that accurately reflect your connector's behaviour:
+
+| Property | Type | Values | Description |
+|---|---|---|---|
+| `replicatesPermissions` | boolean | `true` / `false` | Whether source-system ACLs are mirrored. If `false`, all ingested data is visible to everyone in the workspace. |
+| `syncFidelity` | enum | `append` / `upsert` / `mirror` | `mirror` is recommended — syncs new objects, updates, and deletes. |
+| `supportsIncrementalSync` | boolean | `true` / `false` | Whether the connector syncs only changes since the last run. |
+
+### Data deletion responsibilities
+
+| Approach | Behaviour | Requirement |
+|---|---|---|
+| **Mirror** (recommended) | Deletions synced from source — Teamwork Graph always reflects current state | Implement delete propagation |
+| **Disconnect-only** | Deletions not synced — data persists until admin disconnects | Document this limitation prominently in connector docs and Marketplace listing |
+
+When an admin disconnects, Atlassian automatically removes all ingested data. Your `onConnectionChange` handler with `action: DELETED` only needs to clean up app-side resources (stop sync jobs, remove webhooks, delete stored credentials).
+
+---
+
 ## Troubleshooting
 
 | Problem | Action |
@@ -738,8 +1050,17 @@ The scaffold script is in this skill's directory. The deploy script is in the **
 | `forge create` fails with non-TTY error | `forge create` needs an interactive terminal — ask the user to run it; then write manifest and source files into the created directory |
 | `onConnectionChange` not triggered | Verify admin clicked "Connect" in Atlassian Administration → Connected apps; run `forge tunnel` to confirm the function fires |
 | Objects not appearing in Rovo Search | Wait ~5 minutes for indexing; run `forge logs -e development --since 15m` to check for `setObjects` errors |
+| `setObjects` returns `success: true` but objects missing in Rovo | Check `response.results?.rejected` — individual items can be rejected even when the overall call succeeds; log the `rejected` array for per-item error details |
+| Users with access can't see objects in Rovo Search | Verify the `id` in `accessControls` principals exactly matches the `externalId` used in `graph.setUsers()` / `graph.setGroups()` — mismatched IDs (e.g. `user-42` vs `accountId:user-42`) silently break access |
 | 403 on `@forge/teamwork-graph` calls | Ensure `read:object:jira`, `write:object:jira`, `delete:object:jira` are in manifest scopes, then redeploy and `forge install --upgrade` |
 | `forge login` required | Create API token at https://id.atlassian.com/manage/api-tokens, then run `forge login` |
+| `scheduleOrUpdateTask` returns `{ status: 'ACCEPTED' }` but code reports failure | Branch on `response.error`, not `response.success` — orchestration success responses do not set a boolean `success` field |
+| `task.taskType must be one of: ...` from SDK | `taskType` is a closed enum — use `types.FORGE_TASK_TYPES.*` constants from `@forge/teamwork-graph`; arbitrary strings are rejected client-side |
+| `task.taskId must be a valid UUID format` | Use `uuid()` (v4) for root tasks and `uuidv5(...)` for children — free-form strings like `"my-app:sync"` are rejected |
+| `Failed to schedule child tasks: Not Found - Scan not found` | `scanId` passed to `scheduleChildTask` doesn't match an active scan — ensure you're calling it from within an active `taskRunner` invocation and passing `request.scanId` unchanged |
+| `taskRunner` reports `ENTITY_NOT_FOUND` after a successful run | `TaskInfo` was deleted too eagerly — switch to a `completed: true` flag and short-circuit duplicate deliveries instead of deleting the record |
+| `taskMetadata` is empty in `taskRunner` | `temporalTaskMetadata`/`persistentTaskMetadata` on `scheduleChildTask` are not reliably propagated back — stash everything the handler needs in `KVS` via `TaskInfo.metadata` |
+| `scheduleInterval.value` out of range error | Value must be between 1 and 60; adjust and redeploy |
 
 ---
 
