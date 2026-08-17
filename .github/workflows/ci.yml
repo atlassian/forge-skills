@@ -27,3 +27,15 @@ jobs:
       - name: Run tests
         working-directory: skills/forge-app-builder
         run: python -m unittest discover -s tests -v
+
+  opencode-plugin:
+    name: OpenCode plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Test OpenCode plugin
+        run: bun test ./.opencode-plugin/forge-skills.test.js

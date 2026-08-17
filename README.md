@@ -100,6 +100,43 @@ codex plugin marketplace upgrade atlassian-forge-skills
 codex plugin add forge-skills@atlassian-forge-skills
 ```
 
+### OpenCode
+
+[OpenCode](https://opencode.ai) is configured by the repo's [`opencode.json`](opencode.json), which loads the plugin at [`.opencode-plugin/forge-skills.js`](.opencode-plugin/forge-skills.js). Opening this repo in OpenCode makes all six skills plus the Forge and ADS MCP servers available — no manual setup.
+
+Verify they loaded:
+
+```bash
+opencode debug skill   # lists the six forge-* skills
+opencode mcp list      # shows the forge and ads-mcp servers
+```
+
+The Forge MCP server uses Atlassian OAuth — sign in once with `opencode mcp auth forge` (authenticate any other server the same way if prompted).
+
+To use the Forge skills from **any** project (not just this repo), reference the plugin from your global config at `~/.config/opencode/opencode.json` with an absolute path to your checkout:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["file:///ABSOLUTE/PATH/TO/forge-skills/.opencode-plugin/forge-skills.js"]
+}
+```
+
+The plugin resolves the skills directory from its own location, so it keeps pointing at this repo's `skills/` no matter which project you run OpenCode in.
+
+**Prefer plain config?** Instead of the plugin, replace the repo's `opencode.json` with a declarative version that wires the MCP servers and skills directly. The relative `./skills` resolves against the repo root — for a **global** `~/.config/opencode/opencode.json`, use an absolute path to your checkout's `skills/` instead:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "forge": { "type": "remote", "url": "https://mcp.atlassian.com/v1/forge/mcp", "enabled": true },
+    "ads-mcp": { "type": "remote", "url": "https://mcp.atlassian.com/v1/ads/public/mcp", "enabled": true }
+  },
+  "skills": { "paths": ["./skills"] }
+}
+```
+
 ### Rovo Dev
 
 Rovo Dev doesn't currently support plugin installations but you can install the skills and MCP servers separately.
@@ -183,6 +220,7 @@ Once the plugin is installed, try prompts like these:
 | **Forge Security Review** | `skills/forge-security-review/`                                                                | White-box security audits with rule assets (`SKILL.md`, README, assets/)       |
 | **MCP config**            | `.mcp.json`                                                                                    | Forge MCP Server and ADS MCP Server configuration                              |
 | **Plugin manifests**      | `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `plugin.json`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring                                        |
+| **OpenCode plugin**       | `.opencode-plugin/`, `opencode.json`                                                           | OpenCode plugin (loaded via `opencode.json`): registers the skills + Forge/ADS MCP |
 
 ## Authentication
 
