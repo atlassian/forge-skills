@@ -10,15 +10,10 @@ description: >
   use the @forge/teamwork-graph SDK, or implement onConnectionChange / validateConnection
   functions.
 license: Apache-2.0
-labels:
-  - forge
-  - rovo
-  - jira
-  - atlassian
-  - teamwork-graph
-  - connector
-maintainer: mbanjan94
-namespace: cloud
+metadata:
+  labels: "forge,rovo,jira,atlassian,teamwork-graph,connector"
+  maintainer: mbanjan94
+  namespace: cloud
 ---
 
 # Forge Connector
@@ -1071,4 +1066,3 @@ When an admin disconnects, Atlassian automatically removes all ingested data. Yo
 - Use the **official service name** as the connector name (e.g. `Google Drive`, not `Drive Connector by Acme`)
 - Use the **official service logo** for icons — do not modify or combine with your own branding
 - These guidelines apply only to the `graph:connector` module; your Forge app itself may use your own branding
-

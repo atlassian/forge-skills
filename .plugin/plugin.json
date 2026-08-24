@@ -1,5 +1,4 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "forge-skills",
   "description": "Forge app builder skill bundle with Forge MCP integration for Atlassian Forge workflows.",
   "version": "0.1.0",
@@ -9,5 +8,7 @@
   "homepage": "https://github.com/atlassian/forge-skills",
   "repository": "https://github.com/atlassian/forge-skills.git",
   "license": "Apache-2.0",
-  "keywords": ["forge", "atlassian", "jira", "confluence", "mcp", "skills"]
+  "keywords": ["forge", "atlassian", "jira", "confluence", "mcp", "skills"],
+  "skills": ["./skills/"],
+  "mcpServers": ".mcp.json"
 }
