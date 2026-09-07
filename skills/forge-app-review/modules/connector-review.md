@@ -4,7 +4,6 @@
 When evaluating connector code, use the URL reading tool (`read_url_content`) to fetch the latest guidelines:
 - **Connector Best Practices:** `https://developer.atlassian.com/platform/teamwork-graph/connector-requirements-and-best-practices/`
 - **Manifest Reference:** `https://developer.atlassian.com/platform/forge/manifest-reference/modules/teamwork-graph-connector/`
-- **Security Best Practices:** `https://developer.atlassian.com/platform/forge/security-considerations-and-best-practices/`
 
 ---
 
