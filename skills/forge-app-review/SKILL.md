@@ -108,23 +108,41 @@ Only flag readiness gaps; use `forge-debugger` when there is an observed failure
 
 ## Output Format
 
-Return a concise Markdown report:
+Return a concise Markdown report. **Findings must be a table** (not a numbered list). Include a **Source** column for every finding so the reader knows which review guide or area produced it.
+
+**Source values** (use the most specific that applies — Source is the **checklist/module or review area**, not merely the file type):
+
+- `manifest` — general Forge manifest wiring, scopes, egress, or module keys **not** covered by a module-specific guide
+- `resolver` — backend/resolver wiring and runtime behavior
+- `frontend` — UI Kit / Custom UI invoke and bridge patterns
+- `dependencies` — `package.json` / runtime package fit
+- `tests` — missing or inadequate verification
+- `general` — cross-cutting readiness hygiene not covered above
+- Module-specific labels — when a module review guide is loaded (under `./modules/`), use the Source label that guide defines (for example `connector`). Do **not** re-label those findings as `manifest` just because evidence lives in `manifest.yml`.
+
+**Location rules** (do not path-only):
+
+- Always cite precise `path:line` or `path:start-end` (multiple citations OK).
+- Include the contributing code excerpt in the Location cell — the exact lines that produced the signal, not just the filename.
+- Because Markdown table cells cannot nest ` ``` ` fences reliably, wrap the excerpt in HTML: `<pre><code>...</code></pre>`.
+- Keep excerpts tight (typically ≤15 lines). For absences (e.g. a missing required block), show the nearest enclosing stanza and note what is missing in Description.
 
 ```markdown
 # Forge App Review Results
 
 ## Summary
 - Readiness: Ready | Needs changes | Blocked
-- Highest-risk area: <manifest | resolver wiring | permissions | dependencies | tests | operational hygiene>
+- Highest-risk area: <manifest | resolver wiring | permissions | dependencies | tests | operational hygiene | module-specific>
 - Files inspected: <short list>
 - Specialist handoffs: <none | security | cost | debugger>
 
 ## Findings
 
-1. [Critical | Warning | Info] <title>
-   - Evidence: `<file:line>` and observed pattern
-   - Impact: <why this affects readiness>
-   - Recommendation: <specific fix or specialist handoff>
+| Severity | Source | Finding | Location | Description | Doc | Fix |
+|----------|--------|---------|----------|-------------|---------|-----|
+| Critical \| Warning \| Info | <source> | <short title> | `path:start-end`<br><pre><code>…excerpt…</code></pre> | <why this matters / observed pattern> | <DAC or checklist anchor title + URL> | <specific remediation> |
+
+Sort rows Critical → Warning → Info. Omit the Doc column cell only when no public/doc anchor applies; keep the column.
 
 ## Clean Areas
 - <important categories checked with no issues>
