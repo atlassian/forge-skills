@@ -42,6 +42,15 @@ If a broad review finds a deep security/cost/debug concern, include it as a hand
 - Do not run full SAST or cost tooling from this skill. Recommend the specialist skill when warranted.
 - Do not report speculative security or cost observations as confirmed vulnerabilities or savings.
 
+## Module & Capability Routing
+Detect modules declared in `manifest.yml` or package dependencies, and load specific review guides:
+
+- **Teamwork Graph / Forge Connectors:**
+  - If the app declares `graph:connector`, `teamwork-graph-connector`, or imports `@forge/teamwork-graph`:
+  - 👉 **Follow and evaluate against [`./modules/connector-review.md`](./modules/connector-review.md)**.
+
+---
+
 ## Workflow
 
 1. Read `manifest.yml` or `manifest.yaml`.
