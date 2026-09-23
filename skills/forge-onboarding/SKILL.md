@@ -1,6 +1,6 @@
 ---
 name: forge-onboarding
-description: The first guided experience for someone new to Atlassian Forge, optimized for AI-native development. Takes a first-time builder from zero to a running Rovo Agent — **Forge Guru**, a permanent Forge development companion — that lives on their dev site and answers their Forge questions (which module to use, how to add something to a Jira issue, how to call the Jira REST API, etc.) via live search of Atlassian's official developer docs. Teaches the four AI-native concepts of every Forge app (manifest, modules & extension points, the Context Moat, and backend actions) along the way. Use when the user is new to Forge and asks to "onboard me to Forge", "build my first Forge app", "build my first Rovo Agent", "build my first AI app in Atlassian", "Forge hello world", "Rovo agent hello world", "I've never used Forge before", or similar first-time / activation requests. Do NOT use for existing-app changes, debugging, security reviews, or non-AI extension work — route those to forge-app-builder, forge-debugger, or forge-app-review.
+description: The first guided experience for someone new to Atlassian Forge, optimized for AI-native development. Takes a first-time builder from zero to a running Rovo Agent — **Forge Guru**, a permanent Forge development companion — that lives on their dev site and answers their Forge questions (which module to use, how to add something to a Jira issue, how to call the Jira REST API, etc.) via live search of Atlassian's official developer docs. Teaches the three building blocks of every Forge app (manifest, module, backend function) plus the wider Atlassian platform Forge apps connect into (Rovo, Teamwork Graph in EAP, product APIs) along the way. Use when the user is new to Forge and asks to "onboard me to Forge", "build my first Forge app", "build my first Rovo Agent", "build my first AI app in Atlassian", "Forge hello world", "Rovo agent hello world", "I've never used Forge before", or similar first-time / activation requests. Do NOT use for existing-app changes, debugging, security reviews, or non-AI extension work — route those to forge-app-builder, forge-debugger, or forge-app-review.
 license: Apache-2.0
 metadata:
   labels: "confluence,jira,bitbucket,atlassian,forge,onboarding,ai,rovo,agent,mcp,guru"
@@ -30,16 +30,16 @@ Per-step estimates appear in each section header so you can pace yourself. You c
 **Mission — a successful onboarding produces someone who has:**
 
 - Deployed **Forge Guru** — a permanent Rovo Agent on their own developer site that answers their Forge questions live from the official docs.
-- Internalized the four AI-native concepts of every Forge app: **manifest, modules & extension points, the Context Moat, and backend actions**.
+- Internalized the three building blocks of every Forge app: **manifest, module (extension point), and backend function** — plus an honest picture of the wider Atlassian platform Forge apps can reach (Rovo, Actions, Teamwork Graph in EAP, product APIs, external APIs).
 - Experienced the daily rhythm: **idea → scaffold → configure → deploy → install → see it live → keep iterating with Guru's help**.
 - Absorbed safe defaults: least-privilege scopes and egress, dev vs prod environments, never accepting terms or deploying without knowing what will happen.
-- A clear map of where to go next — Product APIs, `graph:connector` for the Context Moat, `rovo:mcp` for Rovo Studio tools, and the specialist skills that handle each.
+- A clear map of where to go next — Product APIs, `graph:connector` for Teamwork Graph, `rovo:mcp` for Rovo MCP servers, and the specialist skills that handle each.
 - **A keep-forever tool.** Guru doesn't get thrown away at the end of the tutorial — it's the companion they use to keep learning.
 
 ## Design principles (apply throughout)
 
 1. **Outcome over information.** Every step moves the user closer to a running Forge Guru they'll keep using. Explain concepts only when they help the user do or understand the next thing.
-2. **Teach the big picture before the details.** Before we scaffold anything, give the user the four-concept AI-native mental model.
+2. **Teach the big picture before the details.** Before we scaffold anything, give the user the wider Forge platform picture (Step 2a) and the three building blocks they'll actually touch today (Step 2b).
 3. **AI guides, not hides.** Actively perform setup where possible (with permission and narration). The user should leave understanding the workflow, not just the commands.
 4. **Progressive disclosure.** One stage at a time. Confirm success before advancing. If something fails, give focused recovery guidance — don't re-explain the whole flow.
 5. **Minimize setup friction.** The local-machine setup (Step 1) verifies only what's actually required. Give clear time estimates so the user can decide whether to start now or come back later.
@@ -60,12 +60,19 @@ Both skills must be installed together (the standard `forge-skills` plugin bundl
 | Sibling skill helper | Used for | Where invoked |
 |---|---|---|
 | **`forge-app-builder` · `scripts.create_forge_app`** | Non-interactive `forge create` — bypasses the interactive template picker, registers a new app, drops the starter project | Step 5 (Scaffold your Rovo Agent) |
-| **`forge-app-builder` · `scripts.deploy_forge_app`** | Non-interactive `forge deploy` + `forge install` in one call — deploys the app to Atlassian's servers and attaches it to the user's dev site | Step 7 (Deploy Hello World) and Step 10 (Redeploy as Forge Guru) — invoked twice, once per loop of the arc |
 | **`forge-app-builder` · `scripts.list_templates`** | Validate the Rovo Agent template name if the CLI ever renames it | Step 5 (fallback path only) |
 
-**Verify the sibling skill is present before Step 5 begins.** Run `ls <plugin-root>/skills/forge-app-builder/scripts/create_forge_app.py` (or the equivalent for the user's install). If missing, tell the user: *"This onboarding skill relies on the `forge-app-builder` skill for scaffolding, deploying, and installing your app. Both ship together in the [`forge-skills` plugin bundle](https://github.com/atlassian/forge-skills). Install the whole bundle rather than just this one skill, then we'll continue."*
+`forge deploy` and `forge install` are invoked directly (plain CLI) in both Step 7 (Loop 1) and Step 10 (Loop 2). Loop 2 passes `--upgrade --confirm-scopes` to `forge install`; Loop 1 does not. No helper is used for deploy or install.
 
-**If a future Forge CLI need arises that `forge-app-builder` doesn't already expose a helper for, add a helper to that skill first — don't hand-roll the raw `forge` invocation in this one.** (Read-only inspection commands like `forge --version`, `forge whoami`, `forge site provision`, `forge developer-spaces list`, and `forge logs` are the only exceptions — they're identity/site/diagnostics, not app mutation, and are invoked directly here.) Do not attempt to work around a missing sibling — the whole point of the delegation is to use the maintained helper.
+**Verify the sibling skill's `create_forge_app` helper is present and executable before Step 5 begins — invoke it, don't just check that the file exists.** Actually running the helper is the only reliable way to catch broken plugin installs (missing symlinks, wrong path resolution, Python module issues). Run this smoke test from your shell tool:
+
+```bash
+cd <path-to>/skills/forge-app-builder && python3 -m scripts.create_forge_app --help
+```
+
+It must exit cleanly with return code 0 and print usage/help text. If it fails (module not found, file not found, path resolution error), the `forge-app-builder` skill isn't correctly installed alongside this one. Tell the user: *"This onboarding skill relies on the `forge-app-builder` skill for the `forge create` scaffold step. The helper isn't resolving from your environment — check that `forge-app-builder` is installed alongside `forge-onboarding` (they ship together in the [`forge-skills` plugin bundle](https://github.com/atlassian/forge-skills)). If you cloned or symlinked skills individually, add `forge-app-builder` the same way. We can't continue until the helper is invokable."* Stop cold — do not fall back to raw `forge create` to try to work around the missing helper (raw `forge create` is interactive and asks questions the workshop shouldn't require).
+
+**Deploy and install commands are invoked directly in this skill** — see Step 7 (Loop 1) and Step 10 (Loop 2). They're plain, self-explanatory CLI calls; delegating them through a helper adds complexity without benefit. Read-only inspection commands (`forge --version`, `forge whoami`, `forge site provision`, `forge developer-spaces list`, `forge logs`) are also invoked directly.
 
 ## Response formatting rules
 
@@ -118,7 +125,7 @@ Once the user has completed this onboarding, route future requests to the specia
 2. **Never accept credentials in chat.** All auth happens through the Forge CLI's own interactive login flow.
 3. **Never deploy, install, provision a site, or accept Forge terms without explicit user confirmation.** Show the exact command and wait for a "yes."
 4. **Register every new app with `forge create`.** Never hand-build an app identity.
-5. **Delegate every app-mutation `forge` CLI call to the `forge-app-builder` skill.** `forge create` → `scripts.create_forge_app`. `forge deploy` + `forge install` → `scriatpts.deploy_forge_app`. This skill is a thin wrapper; it does not re-implement CLI plumbing that the sibling skill already owns. Only read-only identity/site/diagnostics commands (`forge --version`, `forge whoami`, `forge site provision`, `forge developer-spaces list`, `forge logs`) are invoked directly. If a new app-mutation need arises, add a helper to `forge-app-builder` first — do not hand-roll the raw `forge` invocation here.
+5. **`forge create` is delegated; `forge deploy` and `forge install` are invoked directly.** The scaffold step is the one place where hand-rolled `forge create` invocations reliably go wrong (template name resolution, category prompts, interactive question order) — that's why `forge-app-builder`'s `scripts.create_forge_app` helper owns it. `forge deploy` and `forge install`, by contrast, are simple, self-explanatory CLI commands that the skill invokes directly with plain flags. This keeps the deploy/install path transparent (the user sees the exact command that runs), avoids helper-flag translation issues, and lets Loop 2's redeploy add `--upgrade --confirm-scopes` cleanly without needing a helper passthrough. Read-only identity/site/diagnostics commands (`forge --version`, `forge whoami`, `forge site provision`, `forge developer-spaces list`, `forge logs`) are also invoked directly.
 6. **Prefix any direct Forge CLI commands with `ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding`.** The `forge-app-builder` helper sets its own attribution, so no prefix is needed when you invoke it. Exclude interactive commands the user runs themselves (`forge login`, `forge tunnel`).
 7. **Never modify the on-disk scaffold between Step 5 (`forge create`) and Step 9 (customize into Guru).** Step 6 (*"Take a look at what the scaffold gave us"*) is **pure chat narration** — the agent explains what each file is *for* using a concept summary, and points at the file path so a curious user can open it in their editor. **The agent does not write to `manifest.yml`, `src/index.js`, or any other scaffold file during Step 6.** No inline comments, no reformatting, no touching disk. This keeps the Step 8 first-deploy predictable, gives the user a clean baseline to compare against when we customize into Guru, and avoids YAML/JS syntax errors that could brick the first deploy. The first (and only) write to those files in this whole onboarding happens in Step 10's confirm-gates, when the user has approved a specific target file body.
 8. **Trust the skill for anything it pins down; only reach for the Forge MCP for things it doesn't.** Every command, flag, template name, category name, module name, prompt-answer, and manifest shape this onboarding needs is already spelled out inline (see the readiness tables in Steps 1, 2, 4, 5). **Do not re-verify what the skill already gives you — that wastes user time and adds no value.** Only reach for the Forge MCP (`mcp__forge__*` — `search-forge-docs`, `fetch-api-operation`, `get-api-required-scopes`, `list-forge-modules`, `list-ui-kit-components`, `get-ui-kit-component-reference`, `forge-development-guide`, `forge-app-manifest-guide`, `forge-backend-developer-guide`) when: (a) the skill explicitly tells you to, (b) the user asks about something the skill doesn't cover, or (c) a CLI command errors in a way suggesting the platform surface has changed. Only fall back to official Atlassian web docs when the MCP is unavailable. **Never rely on remembered CLI commands, flags, module names, template names, or scopes** — they change, and a hallucinated command is worse than no command. If you catch yourself about to type a Forge command from memory, stop and verify it with the MCP first.
@@ -126,7 +133,8 @@ Once the user has completed this onboarding, route future requests to the specia
 10. **Rovo AUP awareness.** Rovo Agent capabilities are governed by the Atlassian Acceptable Use Policy — specifically the AI section. Atlassian performs safety screening on Agents. If the user is building anything beyond hello-world, remind them briefly.
 11. **Never run `git` commands.** Do not `git init`, `git add`, `git commit`, `git push`, or any other git operation on the user's behalf during onboarding. Version control is the user's choice and their workflow — the skill's job ends at "app is running." If the user asks about source control, mention that most Forge devs `git init` inside the app directory but let *them* run it.
 12. **Narrate every `forge` command before running it.** Before executing any `forge` CLI command, the agent must tell the user in 1–2 short lines: (a) exactly which command is about to run, and (b) what it will do. No silent execution, even for read-only commands like `forge --version` or `forge whoami`. This builds the mental model of the CLI surface incrementally — by the end of the onboarding, the user has seen every command they'll use for the next year, explained in context.
-13. **Collect every input a command needs before running it — no mid-command surprises.** Forge CLI commands are interactive; each one asks for specific inputs (email + token for `forge login`, app name + category + template for `forge create`, environment name for first `forge deploy`, site URL + product for `forge install`, etc.). Ask the user for these values *before* invoking the command so the flow through the interactive prompts is smooth and predictable. If the CLI ever surprises us with a question we didn't anticipate, treat that as a bug in this skill and add it to a future readiness checklist.
+13. **Never change the pinned Guru `manifest.yml` string values without checking joined length.** The `manifest.yml` schema validator (invoked by `forge deploy`) caps the *joined* length of string fields like `description` and `prompt` at **255 characters**. YAML block-scalar folding (`>-`, `|`) joins multiple source lines into one string value, so *source-line* length is not what the validator sees. Before editing any pinned string in Section 9 (Guru target manifest), compute the joined length by folding `>-` values with single-space joins and preserving newlines for `|` values, then confirm every value stays ≤255 chars. If a string must grow, split its semantic content across multiple fields rather than lengthening one.
+14. **Collect every input a command needs before running it — no mid-command surprises.** Forge CLI commands are interactive; each one asks for specific inputs (email + token for `forge login`, app name + category + template for `forge create`, environment name for first `forge deploy`, site URL + product for `forge install`, etc.). Ask the user for these values *before* invoking the command so the flow through the interactive prompts is smooth and predictable. If the CLI ever surprises us with a question we didn't anticipate, treat that as a bug in this skill and add it to a future readiness checklist.
 
 ---
 
@@ -144,7 +152,7 @@ The onboarding is a **two-loop arc**:
 |---|---|---|---|
 | 0 | Welcome & frame | *(no title, just the welcome)* | User confirms "ready" |
 | 1 | Set up your local machine | *"Set up your local machine"* | Node, CLI, and login all confirmed |
-| 2 | Mental model | *"The AI-native Forge app mental model"* | User can name the 4 concepts back |
+| 2 | What Forge is + what we're building | *"What Forge is, and what we're building today"* (2a broad Forge intro + 2b narrow to Rovo Agent with 3 building blocks) | User can name the 3 building blocks and see how today's Rovo Agent fits into the wider Forge platform |
 | 3 | Meet Forge Guru | *"Meet Forge Guru"* | User understands what Guru is and why it's worth keeping |
 | 4 | Set up your Atlassian environment | *"Set up your Atlassian environment"* (4a working-dir + 4b Developer Space + 4c dev site) | `<working-dir>`, `<space-id>`, and `<site-url>` all captured |
 | 5 | Scaffold the Rovo Agent | *"Scaffold your Rovo Agent"* | Scaffold on disk (delegated to `forge-app-builder`) |
@@ -166,15 +174,20 @@ Use language along these lines (adapt the exact wording; keep the structure):
 
 > 👋 **Welcome to Atlassian Forge onboarding.**
 >
-> What better way to learn something than by building it? **Today we're building Forge Guru together — your first Rovo Agent on the Atlassian Forge platform.**
+> **Forge lets you build apps that extend Atlassian products, connect platform data, and power AI experiences.** In this onboarding, you'll learn the core building blocks of a Forge app by building a **Rovo Agent** from scratch.
 >
-> Forge is Atlassian's official platform for building AI agents, workflows, and integrations on top of Jira, Confluence, and Rovo. **Forge Guru** is the small AI teammate we'll build together — it'll live on your own developer site as your permanent Forge companion, ready to answer your Forge questions whenever you come back to it.
+> By the end you'll understand three things:
+> 1. **The foundation** — the pieces every Forge app is made of: manifest, modules, functions, permissions, deploy, install, logs.
+> 2. **How Forge connects into the wider Atlassian platform** — Rovo, Actions, Teamwork Graph, product APIs, the full surface Forge apps can reach.
+> 3. **How those pieces come together in a real app** — because you'll have built one. Meet **Forge Guru**, your personal Rovo Agent that answers Forge questions from the official docs, running live on your own developer site by the end of this session.
+>
+> What better way to learn than by building? Let's go.
 >
 > **This is the shape of the onboarding:**
 >
-> - **Set up** — check your tools (Node, Forge CLI, login), learn the four AI-native concepts every Forge app is built from, and gather the three things the scaffold needs from you (folder on disk, Developer Space, dev site).
-> - **Loop 1 — ship a Hello World Rovo Agent** — scaffold it, get a feel for the two files it's made from, deploy it, chat with it live in Rovo. First win.
-> - **Loop 2 — turn Hello World into Forge Guru** — customize the two files (with you approving every change), redeploy, and see Guru live.
+> - **Set up** — check your tools (Node, Forge CLI, login), learn what Forge is and where it fits in the Atlassian platform, and gather the three things the scaffold needs from you (folder on disk, Developer Space, dev site).
+> - **Loop 1 — ship a Hello World Rovo Agent** — scaffold it, get a feel for the two files it's made from, deploy it, chat with it live in Rovo. First win — the foundation in action.
+> - **Loop 2 — turn Hello World into Forge Guru** — customize the two files (with you approving every change), redeploy, and see Guru live. All three points at once.
 > - **What next** — decide where to go from here to keep building.
 >
 > We'll go step by step and I'll never rush ahead — every mutating step waits for your explicit go-ahead.
@@ -301,37 +314,48 @@ After confirmation, re-run `forge whoami` to verify. Then:
 
 ---
 
-### Step 2 — The AI-native Forge app mental model
+### Step 2 — What Forge is, and what we're building today
 
-Four concepts, one plain-language line each. Use the formatting below to keep this scannable — no walls of text. The user should be able to skim the section and still walk away with the mental model intact.
+This step does two things in sequence — an honest, broad picture of what the Forge platform *is*, then a deliberate narrowing to the one specific app type we'll build today. Split it visually so users read them as two distinct beats, not one long info dump.
 
-**Open with a header + one framing line:**
+---
 
-> **Step 3 — The AI-native Forge app mental model**
+**Step 2a — What Forge is (the wider picture).**
+
+Set the platform frame before we narrow. Don't water Forge down to "the Rovo Agent framework" — it's a much bigger app platform. Use language along these lines (adapt wording; keep the two-part structure — foundation + wider platform):
+
+> **What Forge is.**
 >
-> Before we scaffold anything, here's the mental model. Every Forge app you'll ever see is built out of these four pieces.
+> **1. The foundation — how every Forge app is built.**
+> Every Forge app, regardless of shape, is made of the same small set of building blocks: a **manifest** (declarative config that says what the app is, where it appears, and what it's allowed to do), one or more **modules** (extension points that plug into Atlassian products), backend **functions** (your code, hosted for you), and **permissions** (what the app can touch — always minimal by default). The CLI commands you'll use today — `forge deploy`, `forge install`, `forge logs` — are how those pieces get from your machine onto Atlassian's servers. Everything is cloud-only and hosted by Atlassian; there are no servers for you to run.
+>
+> **2. The wider Atlassian platform — what Forge apps can reach.**
+> Forge apps plug into a much bigger surface than most people realize:
+> - **Product surfaces** — issue panels, admin pages, custom fields, workflow post-functions in Jira; macros and admin pages in Confluence; queues, portals, and request types in JSM; UI extensions in Bitbucket; Compass integrations.
+> - **Rovo** — build custom **Agents** (like today's), **Actions** (single-purpose skills Rovo can invoke), **Connectors** (bring outside data into Atlassian search), and **MCP servers** (expose your app's capabilities to any MCP client).
+> - **Teamwork Graph** — Atlassian's cross-product context graph, the source of truth for how work, people, docs, and projects relate across your instance. **Currently in Early Access** — you can't wire it into today's app yet, but knowing it exists means you'll recognize the next wave of Forge features when they land.
+> - **Product APIs** — call Jira, Confluence, JSM, Bitbucket, Compass, and Rovo directly from your Forge functions via `@forge/api`.
+> - **External APIs** — make outbound network calls to any URL you declare in your manifest.
 
-**Then present the four concepts as a compact table** — this is the most scannable format for parallel content:
+---
 
-> | # | Concept | One-line meaning |
+**Step 2b — What we're building today (the specific slice).**
+
+Now narrow. Be explicit about *why* Rovo Agent is the artifact we picked — and be explicit that everything transfers. Use language along these lines:
+
+> **What we're building today.**
+>
+> Of everything Forge can do, we're going to build one specific kind of app today: a **Rovo Agent**. Here's why: it's the fastest way to feel Forge's full pipeline end-to-end — you write a manifest, declare a module, wire it to a backend function, deploy it, and chat with it live in Rovo, all in about 15 minutes. Every other Forge app type uses the same manifest / module / backend concepts you'll learn here. What you learn today transfers directly to building a Jira issue panel, a Confluence macro, a JSM automation, or any other Forge extension.
+>
+> **The three building blocks you'll touch today** — the concrete slice of Forge you're about to work with:
+>
+> | # | Building block | What it is |
 > |---|---|---|
-> | 1 | **Manifest** (`manifest.yml`) | The configuration file that declares what your app is, where it appears, and what it's allowed to do. |
-> | 2 | **Modules & Extension Points** | Where your app shows up and what shape it takes — a `rovo:agent` is a chat Agent, a `jira:issuePanel` is an issue panel, a `graph:connector` ingests external data. |
-> | 3 | **The Context Moat** (Teamwork Graph + MCP) | Forge runs *inside* Atlassian, so your app can tap the org's real work — projects, issues, pages, people. This is why AI built here is smarter and more defensible than any bolt-on. |
-> | 4 | **Backend** (Actions & Resolvers) | The code that actually runs. **Actions** are what an Agent can *do*. **Resolvers** are what a UI can call. Both run on Atlassian's servers with permissions from the manifest. |
-
-**Then a "what actually happens when a user chats with the Agent" beat** — walk through the runtime, step by step, in plain language. This is the moment the mental model clicks:
-
-> **What actually happens when you type a message to a Rovo Agent:**
+> | 1 | **Manifest** (`manifest.yml`) | The declarative config file that says what your app is, where it appears in Atlassian, and what it's allowed to do (permissions, scopes, external URLs it can call). |
+> | 2 | **Module** (`rovo:agent`) | The extension point that makes your app *be* something in Atlassian. For today, `rovo:agent` makes your app show up as an Agent people can chat with in Rovo. For other apps you'd pick a different module — `jira:issuePanel`, `confluence:macro`, `graph:connector`, and so on. |
+> | 3 | **Backend function** | The JavaScript code your module points at. Runs on Atlassian's servers with only the permissions your manifest declared. For our Agent, one function handles one action — searching Forge docs and returning the top matches. |
 >
-> 1. **You type a question** into the Rovo chat panel on your Atlassian site (e.g. *"Search the Forge docs for issue panel examples"*).
-> 2. **Rovo reads your app's `manifest.yml`** to see which Agent is being addressed and what actions it has available.
-> 3. **The Agent's `prompt` decides what to do** — its personality and instructions steer it toward calling one of its declared actions.
-> 4. **The Agent invokes an action** by name (e.g. `searchForgeDocs`), passing along the input arguments it inferred from your message.
-> 5. **Forge runs the backend function** the action points at, on Atlassian's servers — with only the permissions your manifest declared (in our case: outbound HTTP to `developer.atlassian.com`).
-> 6. **The function returns data back to the Agent**, which composes a helpful reply and streams it to you in chat.
->
-> That's the whole loop for a Rovo Agent. Every Forge app — whether it's an Agent, a Jira issue panel, a Confluence macro, a scheduled trigger, or a Teamwork Graph connector — follows the same shape: your **manifest** declares one or more **modules** that hook into Atlassian, and each module points at **backend** code that runs on Atlassian's servers with the permissions you declared. Bigger, more capable apps just declare more modules, more actions, more permissions, and pull in more context. The four concepts don't change.
+> We'll walk through what actually happens *at runtime* — the message → manifest → module → function → response flow — right after we deploy the app and you send your first message to it. Concepts land better when you've just watched them happen.
 
 **Optional bookmarks the agent can offer** *if* the user asks for more (do not dump these proactively — offer only on request):
 
@@ -343,7 +367,7 @@ Four concepts, one plain-language line each. Use the formatting below to keep th
 
 **Ask if the user has questions on the mental model** before advancing:
 
-> "Any of those four concepts feel fuzzy? Otherwise, in the next step I'll introduce the specific agent we're building today — **Forge Guru**."
+> "Any of those three building blocks feel fuzzy? Otherwise, in the next step I'll introduce the specific Rovo Agent we're building today — **Forge Guru**."
 
 ---
 
@@ -353,7 +377,7 @@ The user now understands *any* Forge app in the abstract. Time to introduce the 
 
 Use language along these lines (formatting matters — use headers so the reader can skim, no wall of text):
 
-> **Step 4 — Meet Forge Guru, the AI agent we're about to build**
+> **Meet Forge Guru, the AI agent we're about to build**
 >
 > **What it is**
 > A Rovo Agent that lives permanently on your dev site as your personal Forge expert. It's not a throwaway hello-world — it's a keep-forever tool you'll come back to.
@@ -366,9 +390,9 @@ Use language along these lines (formatting matters — use headers so the reader
 >
 > Guru searches [Atlassian's official developer docs](https://developer.atlassian.com/platform/forge/) live and replies with cited links — no hallucinated APIs.
 >
-> **What it's built from** — the four pieces you just learned about:
+> **What it's built from** — the three building blocks you just learned about:
 > - A `manifest.yml` that declares one `rovo:agent` module.
-> - One `action` called `searchForgeDocs`.
+> - One `action` called `searchForgeDocs` (a single-purpose skill the Agent can invoke).
 > - A backend `function` that fetches from `developer.atlassian.com` and returns cited results.
 > - Nothing more.
 >
@@ -593,13 +617,15 @@ Expect at minimum: `manifest.yml`, `package.json`, and an `src/` directory. Open
 
 **Wrap up Step 5.** Advance to Step 6.
 
-*(No standalone `npm install` step. `forge deploy` in Step 7 handles dependency installation automatically for the stock scaffold — no action needed here. The first place we actively manage `package.json` is Step 9, where the Guru code introduces a new dependency; see 9b.)*
+*(No `npm install` step here. `forge deploy` in Step 7 handles dependency installation automatically for the stock scaffold — no action needed. The first place we actively manage `package.json` is Step 9b, where we add `@forge/api` and then explicitly run `npm install` to sync `node_modules/` before Step 10's redeploy.)*
 
 ---
 
 ### Step 6 — Take a look at what the scaffold gave us
 
 Before we ship or edit anything, help the user understand the two files the scaffold produced. Concepts live in chat; syntax lives in the actual files on disk — the agent points at them so the user can open them in their editor if they want to see the real code they now own. **The agent must not modify these files during Step 6.** The on-disk scaffold stays exactly as `forge create` produced it until Step 9.
+
+**Thesis callback for this step** (weave into the intro naturally, don't say it as a separate sentence): *"What you're about to walk through **is** point #1 of the onboarding — the foundation. The manifest, the module, the backend function — the pieces every Forge app is made of — are on your disk right now, in a folder you can open."*
 
 **Purpose (internal):** anchor the mental model in something concrete before Loop 2 asks the user to approve changes to it.
 
@@ -666,18 +692,18 @@ Before we ship or edit anything, help the user understand the two files the scaf
 
 ### Step 7 — Deploy your first Forge app
 
-Ship the stock Hello World agent. This is the user's first-ever Forge deploy — the confidence beat depends on it landing cleanly. **Delegated end-to-end to `forge-app-builder`'s `scripts.deploy_forge_app`** — one non-interactive call runs `forge deploy` + `forge install` together.
+Ship the stock Hello World agent. This is the user's first-ever Forge deploy — the confidence beat depends on it landing cleanly. **Two plain CLI commands, invoked directly.** No helper, no wrapper — the commands are simple and self-explanatory.
 
 **User-facing title for this step: *"Your first Forge app is Deployed and Installed to your <site-url>"*.**
 
 Before running anything, say this out loud:
 
-> "Two commands under the hood, one call in practice:
+> "Two commands, done one at a time:
 >
 > - **`forge deploy`** publishes your code to Atlassian's servers under your app ID. Think of it as 'save to the cloud.' It doesn't affect any site or any user yet.
 > - **`forge install`** attaches your deployed app to a specific site. This is what actually makes the agent appear in Rovo on that site.
 >
-> You'll deploy many times per day while iterating; you install once per site. This is the daily rhythm of every Forge developer. The `forge-app-builder` skill wraps both into a single non-interactive call so you don't have to run them separately."
+> You'll deploy many times per day while iterating; you install once per site. This is the daily rhythm of every Forge developer."
 
 Also introduce **environments** briefly:
 
@@ -689,7 +715,7 @@ Also introduce **environments** briefly:
 
 **7a. Confirm the deploy + install plan with the user.**
 >
-> Now its time to get your app from your disk onto Atlassian's servers and into Rovo on your dev site. Here's the plan:
+> Now it's time to get your app from your disk onto Atlassian's servers and into Rovo on your dev site. Here's the plan:
 >
 > - Run **`forge deploy`** — upload the stock scaffold to Atlassian's servers in the `development` environment. No site is affected yet.
 > - Run **`forge install`** — attach the deployed app to your dev site: **`<site-url>`** (product: `jira`, environment: `development`). This is what makes the agent appear in Rovo on that site.
@@ -702,21 +728,27 @@ Also introduce **environments** briefly:
 
 ---
 
-**7b. Delegate deploy + install to `forge-app-builder`.**
-Deploying and installing your first Forge app is a one-line helper call. The helper runs `forge deploy` and `forge install` together, non-interactively, so the user doesn't have to navigate CLI menus.
+**7b. Run `forge deploy`, then `forge install`.**
 
-**Invoke the helper from the `forge-app-builder` skill directory** (adjust the path to your local plugin bundle). Use the app directory from Step 6 (the scaffold) as `--app-dir` and the site URL captured in Step 4c as `--site`:
+Two commands, run in sequence from the app directory. Use the app directory from Step 6 (the scaffold) and the site URL captured in Step 4c.
 
 ```bash
-cd <path-to>/skills/forge-app-builder
-python3 -m scripts.deploy_forge_app \
-  --app-dir <working-dir>/forge-guru \
-  --site <site-url> \
-  --product jira \
-  --env development
+cd <working-dir>/forge-guru
+ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge deploy --non-interactive
+ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge install --non-interactive --site <site-url> --product jira -e development
 ```
 
-Wait for completion. On success the helper prints both a deploy confirmation and an install confirmation.
+**Loop 1 install has no `--upgrade` or `--confirm-scopes` flags** — this is a first-time install of an app that declares no permissions, so there's nothing to upgrade from and no scopes to confirm. Loop 2 (Step 10) adds those flags because Guru introduces a new external-fetch permission.
+
+Run each command via your shell tool, wait for it to complete, then run the next.
+
+**Success signals:**
+- `forge deploy` prints `Deployed to development` and exits 0.
+- `forge install` prints `Installed on <site-url>` and exits 0.
+
+Move on to Step 7c once both have exited cleanly.
+
+---
 
 **7c. Celebrate the first win. Do not skip this.**
 
@@ -730,8 +762,9 @@ Wait for completion. On success the helper prints both a deploy confirmation and
 
 **Common failure modes:**
 
-- **Forge terms not accepted** → the helper stops. Do not accept on the user's behalf. Tell the user: *"Those terms cover what your app is allowed to do with data on the site — reading them yourself is a habit worth keeping. Run `forge deploy` interactively once, accept the terms, then I'll re-run the helper."*
+- **Forge terms not accepted** → `forge deploy` stops. Do not accept on the user's behalf. Tell the user: *"Those terms cover what your app is allowed to do with data on the site — reading them yourself is a habit worth keeping. Run `forge deploy` interactively once, accept the terms, then I'll re-run the deploy."*
 - **Rovo not activated on the site** → *"Rovo isn't activated on this site. If we provisioned a demo site in Step 4c this shouldn't happen — but if you brought your own site, we may need a different one. Want me to run `forge site provision` for a demo site instead?"*
+- **`forge install` reports *"app is already installed"*** → the install actually already succeeded on a previous run and the current attempt is a duplicate. That's the successful outcome — move on to Step 7d to confirm with `forge install list --json`.
 - **Any other error** → surface verbatim and consider routing to `forge-debugger`.
 
 ---
@@ -781,11 +814,28 @@ Walk the user into Rovo and get them to chat with the stock agent. **This is the
 > - Confirm Rovo is activated on this site (demo sites have it by default).
 > - If it's still stuck, ask me to load the `forge-debugger` skill.
 
-**Ask the user to confirm they saw the agent respond before advancing.** Then transition:
+**Ask the user to confirm they saw the agent respond before advancing.**
 
-> **🎉 You just shipped and used your first Forge app. Now the fun part: let's turn this Hello World into something you'll actually want to keep.**
+**Once they confirm — walk them through what just happened server-side.** Concepts land better right after you've watched them happen, and this is that moment. Use language along these lines:
 
-**Do not advance to Step 10 until the user confirms they saw the Hello World agent respond in Rovo.**
+> **What just happened, step by step.**
+>
+> You typed a message and got a reply. Here's the actual server-side loop those seven seconds walked through — this is how *every* Rovo Agent works:
+>
+> 1. **You typed a message** into the Rovo chat panel on your dev site.
+> 2. **Rovo read your app's `manifest.yml`** to see which Agent was being addressed and what actions it had available.
+> 3. **The Agent's `prompt` decided what to do** — its personality and instructions steered it toward calling one of its declared actions.
+> 4. **The Agent invoked an action** by name, passing along the input arguments it inferred from your message.
+> 5. **Forge ran your backend function** — the code in `src/index.js` — on Atlassian's servers, with only the permissions your manifest declared.
+> 6. **The function returned data back to the Agent**, which composed a reply and streamed it back to you in chat.
+>
+> That's the full loop. Every other kind of Forge app follows the same shape: your **manifest** declares one or more **modules** that hook into Atlassian, and each module points at **backend** code that runs on Atlassian's servers with the permissions you declared. Bigger, more capable apps just declare more modules, more actions, more permissions, and pull in more context. The three building blocks don't change.
+
+**Then transition to Step 9:**
+
+> **🎉 You just shipped and used your first Forge app — and you just watched the three building blocks come together end-to-end. Now the fun part: let's turn this Hello World into something you'll actually want to keep.**
+
+**Do not advance to Step 9 until the user confirms they saw the Hello World agent respond in Rovo.**
 
 ---
 
@@ -859,16 +909,26 @@ Now we evolve the stock Hello World agent into **Forge Guru** — a real, useful
 
 **Wait for an explicit affirmative before writing to disk.** Answer any questions first — the whole point of this gate is that the user leaves understanding *why* the code looks the way it does.
 
-**When the user confirms**, do BOTH writes as one atomic step:
+**When the user confirms**, do ALL THREE actions as one atomic step:
 
 1. **Replace `src/index.js`** with the pinned target-file JavaScript (see 9-ref below).
 2. **Update `package.json`** — read the existing file (do not overwrite it), parse the JSON, ensure `dependencies["@forge/api"]` is present. If it's already there, leave the version untouched. If it's missing, add it at the latest published major (get the current version with `npm view @forge/api version` if unsure, or use the same version the `forge-app-builder` scaffold ships in newer templates). Preserve all other fields in `package.json` exactly as they are — `name`, `version`, `main`, `scripts`, `license`, existing dependencies, etc. Do not reformat or reorder.
+3. **Run `npm install`** from the app directory to sync `node_modules/` with the newly-declared `@forge/api` dependency. Editing `package.json` only records the intent — Node still has to actually download the package into `node_modules/` before Forge can bundle it. Without this, Step 10's `forge deploy` will fail with `Cannot find module '@forge/api'`.
 
-**After writing both:**
+```bash
+cd <working-dir>/forge-guru
+npm install
+```
+
+Wait for `npm install` to complete before advancing.
+
+**After all three actions:**
 
 > ✅ `src/index.js` replaced. `searchForgeDocs` handler wired to the manifest, egress-controlled `api.fetch` in place, empty-query / HTTP-error / zero-result paths all route through `fallback`, three curated Forge doc links as the safety net.
 >
-> ✅ `package.json` updated with `@forge/api` in `dependencies`. `forge deploy` in the next step will install it automatically as part of its build pipeline.
+> ✅ `package.json` updated with `@forge/api` in `dependencies`.
+>
+> ✅ `npm install` complete — `@forge/api` is now in `node_modules/` and ready for Step 10's redeploy. **Quick teaching moment: `package.json` records *what* dependencies your app needs; `node_modules/` is where they actually live on disk. Editing `package.json` doesn't touch `node_modules/` — you have to run `npm install` to sync them. That's why we ran it right after adding `@forge/api`.**
 
 **Sanity-check what you wrote** before advancing:
 - The exported symbol name in `src/index.js` must match the manifest's `handler: index.searchForgeDocs`.
@@ -891,39 +951,21 @@ Every source line below is ≤160 characters and every field value fits Forge's 
 # A Rovo Agent that answers Forge questions
 # by searching Atlassian's official developer docs.
 modules:
+  # 📌 LINT NOTE — every string value below has been kept ≤255 chars after YAML block-scalar
+  # folding. If you edit `description`, `prompt`, or any other string, recompute the joined length
+  # (fold >- with single spaces, preserve newlines in |) and stay under 255 chars each. See
+  # invariant #13 in this skill for the full rule.
   rovo:agent:
     - key: forge-guru
       name: Forge Guru
-      description: >-
-        Your personal Forge development companion.
-        Answers your Forge questions by searching
-        Atlassian's official developer docs.
+      description: Your Forge companion — answers Forge questions from the official docs.
       prompt: |
-        You are Forge Guru, a companion for developers
-        building Atlassian Forge apps. You answer
-        questions about the Forge platform: which
-        modules to use, how to add features to Jira
-        and Confluence, how to work with Rovo Agents,
-        resolvers, permissions, the Forge CLI, and
-        deployment.
-
-        When a user asks how to do something in Forge:
-          1. Use the search-forge-docs action to find
-             authoritative documentation.
-          2. Explain the answer in plain language,
-             tailored to their skill level.
-          3. Always cite the doc URL you found.
-          4. Suggest a concrete next command or code
-             snippet when useful.
-
-        Be concise, warm, and confidence-building.
-        You were literally built by this developer as
-        their first Forge app — meet them where they
-        are. Never invent Forge APIs, CLI commands,
-        module names, or scopes. If search returns
-        nothing useful, say so and point them at
-        https://developer.atlassian.com/platform/forge/
-        instead of guessing.
+        You are Forge Guru. Answer Forge questions.
+        For every question:
+        1. Call search-forge-docs first.
+        2. Answer plainly and cite the doc URL.
+        3. Never invent APIs or CLI commands.
+        If search finds nothing, say so.
       conversationStarters:
         - What can I build with Forge?
         - Which Forge module should I use for my idea?
@@ -936,24 +978,13 @@ modules:
     - key: search-forge-docs
       function: searchForgeDocs
       actionVerb: GET
-      description: >-
-        Searches Atlassian's official Forge developer
-        docs for a query and returns the top matching
-        pages with titles, URLs, and snippets. Use it
-        whenever the user asks how to do something in
-        Forge, which module to use, how a Forge API
-        works, or any question the official docs can
-        answer.
+      description: Searches the official Forge docs and returns top matching pages with URLs.
       inputs:
         query:
           title: Search query
           type: string
           required: true
-          description: >-
-            The user's Forge question, or the key
-            phrases from it. Prefer specific technical
-            terms (module names, CLI commands, API
-            paths) over full sentences.
+          description: The user's Forge question or key search phrases.
   function:
     - key: searchForgeDocs
       handler: index.searchForgeDocs
@@ -1053,37 +1084,35 @@ Same helper, second time. This is the daily-rhythm beat — the user sees that i
 
 > **Redeploy — this time as Forge Guru · plan**
 >
-> Same `forge-app-builder` helper as before, same command shape, same site. This time it'll ship the Forge Guru version of the manifest + code, still to the `development` environment on the same app ID. No re-install needed if the app is already installed — the deploy alone updates what's running.
+> Same two commands as Step 7 (`forge deploy` then `forge install`), same site, same environment (`development`), same app ID. This time they'll ship the Forge Guru version of the manifest + code.
 >
-> **⚠️ Heads up: this is a major version bump.** Because Guru's manifest adds a new external-fetch permission (`https://developer.atlassian.com` in `permissions.external.fetch.backend`), Forge treats this as a **breaking change** — scope additions can affect any existing install of the app, so Forge requires an explicit acknowledgment before shipping it. Two things flow from that:
+> **Differences from Loop 1:** `forge deploy` gets a `--approve` flag, and `forge install` gets `--upgrade --confirm-scopes`.
 >
-> 1. **`forge deploy` succeeds normally** — deploy itself doesn't need special flags for major-version bumps. The version metadata just gets stamped on the new deployment.
-> 2. **`forge install --upgrade` is what acknowledges the major-version bump.** The bump only affects existing installs, so the acknowledgment lives on the install command, not deploy. I'll pass `--upgrade` to the install portion of the helper so it goes through non-interactively — no manual prompt to answer.
-> 3. **The install may also ask you to accept the new permission** on first install with an updated scope. The helper handles this non-interactively where it can; if the CLI stops on a Forge-terms prompt I'll surface it and hand it to you.
+> - `forge deploy --approve MAJOR_VERSION_RULE` — acknowledges the major-version bump on the deploy side. Forge stamps the new scope on the deploy artifact itself, so `forge deploy` pauses on the major-version rule unless we pre-approve it. This flag is what keeps the deploy running non-interactively.
+> - `forge install --upgrade` — tells install to update the existing installation (which was placed in Step 7) rather than expecting a fresh one.
+> - `forge install --confirm-scopes` — pre-approves the new scope (`developer.atlassian.com` in `permissions.external.fetch.backend`) so the install goes through non-interactively.
 >
-> This is a real Forge platform concept — you'll see it every time you add or remove a permission, module, or scope. Loop 1's first deploy hit the same guardrail silently (a brand-new app is by definition a breaking change against "nothing"), so this is your first *visible* one.
+> This is a real Forge platform pattern — you'll add these flags every time you redeploy an app whose scopes or permissions changed. Loop 1 didn't need them because there was no prior install to upgrade from and no scopes.
 >
 > **Ready?** (**yes / go / sure / y / ok**)
 
-**Wait for an affirmative.** Then invoke (note the `--upgrade` flag routed to the *install* portion of the helper, not deploy):
+**Wait for an affirmative.** Then run the two commands in sequence from the app directory:
 
 ```bash
-cd <path-to>/skills/forge-app-builder
-python3 -m scripts.deploy_forge_app \
-  --app-dir <working-dir>/forge-guru \
-  --site <site-url> \
-  --product jira \
-  --env development \
-  --extra-install-args "--upgrade"
+cd <working-dir>/forge-guru
+ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge deploy --non-interactive --approve MAJOR_VERSION_RULE
+ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge install --non-interactive --upgrade --confirm-scopes --site <site-url> --product jira -e development
 ```
 
-**Helper-flag note (for the agent, not the user):** the `--upgrade` flag belongs on `forge install`, **not `forge deploy`** — the version bump only affects the install step (existing installs need to acknowledge the new scope). The exact way to pass it through depends on the version of `scripts.deploy_forge_app` in the installed `forge-app-builder` skill. If the helper accepts an `--extra-install-args` (or similar) pass-through flag, use it. If not, or if the helper doesn't currently support `--upgrade` at all, catch the CLI's interactive major-version prompt inline (which appears during the *install* portion of the helper's flow) and answer `yes` — the user has already been briefed that this is happening and why. **Follow-up for the `forge-app-builder` team:** add first-class `--upgrade` pass-through to `scripts.deploy_forge_app` so this fallback isn't needed.
+**Success signals:**
+- `forge deploy` prints `Deployed to development` and exits 0.
+- `forge install` prints `Installed on <site-url>` and exits 0 (may also print a scope-acknowledgment line).
 
 On success:
 
-> ✅ **Guru is deployed and installed.** Same environment, same site — the app ID hasn't changed, but the agent is now Forge Guru with the new prompt, the new action, and the egress permission for `developer.atlassian.com`. And the major-version bump was accepted — v1.0.0 → v2.0.0 (or whatever the next major is), because we added a permission scope.
+> ✅ **Guru is deployed and installed.** Same environment, same site — the app ID hasn't changed, but the agent is now Forge Guru with the new prompt, the new action, and the egress permission for `developer.atlassian.com`.
 
-**Common failure modes** — same as Step 7 (Forge terms, Rovo not activated, manifest validation error, other). Manifest-validation errors are the one to watch for here since we just edited the file — surface the helper's output verbatim and route back to Step 9a to fix the specific field. If the major-version prompt stalls the install (helper doesn't support `--upgrade` passthrough and the interactive prompt isn't being caught during the install step), answer `yes` when it appears — the user was pre-briefed above.
+**Common failure modes** — same as Step 7 (Forge terms, Rovo not activated, other). Manifest-validation errors are the one to watch for here since we just edited the file — surface the CLI output verbatim and route back to Step 9a to fix the specific field.
 
 ---
 
@@ -1115,6 +1144,8 @@ Walk the user into Rovo on their dev site, help them find Guru, and get them to 
 > - If it's still stuck, ask me to load the `forge-debugger` skill.
 
 **Once the user has chatted with Guru, ask them the honest evaluation question.** This is the real success signal for a Rovo Agent — the *quality* of the response, not the fact that it responded. Only the user can judge that.
+
+**Thesis callback for this step** (weave into the celebration, don't say it as a separate sentence): *"That was all three points of the onboarding at once — the foundation (#1: manifest, module, function, permissions), running against the wider Atlassian platform (#2: Rovo, external APIs), doing something you'd actually use (#3: your keep-forever Forge companion)."*
 
 > **How did that feel?**
 >
@@ -1161,7 +1192,7 @@ Wait for confirmation, then advance to Step 12.
 > - **`fetch is not defined` / permission error** → the manifest is missing `permissions.external.fetch.backend` for `developer.atlassian.com`. Go back to `manifest.yml`, confirm the permission is there, redeploy.
 > - **HTTP 4xx/5xx from `developer.atlassian.com`** → the docs-search endpoint may have changed shape. Guru's `fallback` helper should have kicked in and returned the three curated doc links — verify Guru at least gave you *something*.
 > - **No logs at all** → the function never ran. That usually means the action definition is off — check `manifest.yml`'s `action` module has `function: searchForgeDocs` and the function module's `handler: index.searchForgeDocs` matches the exported symbol in `src/index.js`.
-> - **`Cannot find module '@forge/api'`** → `package.json` didn't get updated with the `@forge/api` dependency. Go back to Step 9b, confirm the `package.json` edit, redeploy.
+> - **`Cannot find module '@forge/api'`** → either `package.json` didn't get updated OR `npm install` didn't run after the update. Go back to Step 9b, confirm `package.json` includes `@forge/api` in `dependencies`, run `npm install` in the app directory, then redeploy.
 >
 > Once you know what happened, fix it and redeploy (same command from Step 10). If you're stuck, ask me to load the `forge-debugger` skill — it's built for exactly this kind of investigation.
 
@@ -1190,15 +1221,15 @@ Structure of this final message: **graduation framing → Get inspired → the f
 
 > 🚀 **You've just completed the guided *Build* stage of your Forge journey.**
 >
-> Everything you did today — pre-flight, scaffold, deploy, install, customize, redeploy — maps to stage 1 of Atlassian's official [Build and launch your Forge app](https://developer.atlassian.com/platform/forge/build-and-launch-your-forge-app/) doc. That doc is your map for the whole journey. Here's what the rest of it looks like, plus what to explore first.
+> You now know the foundation (point #1) and you've seen how Forge connects into the wider Atlassian platform (point #2) — plus you've got the real, working app to prove it (point #3). Everything you did today — pre-flight, scaffold, deploy, install, customize, redeploy — maps to stage 1 of Atlassian's official [Build and launch your Forge app](https://developer.atlassian.com/platform/forge/build-and-launch-your-forge-app/) doc. That doc is your map for the whole journey. Here's what the rest of it looks like, plus what to explore first.
 >
 > ### Get inspired — see what other Forge apps look like
 >
-> Before you decide what to build next, take 10 minutes and look at some real Forge apps other developers have built and open-sourced. All three are on [atlassian-labs/forge-inspired](https://github.com/atlassian-labs/forge-inspired) — clone them, run them on your dev site, or just read the code to see how the four Forge concepts you now know show up in more ambitious apps.
+> Before you decide what to build next, take 10 minutes and look at some real Forge apps other developers have built and open-sourced. All three are on [atlassian-labs/forge-inspired](https://github.com/atlassian-labs/forge-inspired) — clone them, run them on your dev site, or just read the code to see how the three building blocks you now know (manifest, module, backend function) show up in more ambitious apps.
 >
 > - **[Sprint Ready Agent](https://github.com/atlassian-labs/forge-inspired/tree/main/sprint-ready-agent)** — turns a rough Jira issue into a clearer, sprint-ready ticket with useful context, acceptance criteria, and open questions. A more ambitious Rovo Agent than Guru.
 > - **[Smart Workflow Follow-up](https://github.com/atlassian-labs/forge-inspired/tree/main/smart-workflow-followup)** — posts a personalized follow-up message whenever a Jira issue reaches a chosen status. A great example of Jira product event handlers.
-> - **[Team Pulse Board](https://github.com/atlassian-labs/forge-inspired/tree/main/team-pulse-board)** — surfaces contributors, related Jira work, and recent activity on a Confluence page. A great example of a UI Kit app that reads across Atlassian products via the Context Moat.
+> - **[Team Pulse Board](https://github.com/atlassian-labs/forge-inspired/tree/main/team-pulse-board)** — surfaces contributors, related Jira work, and recent activity on a Confluence page. A great example of a UI Kit app that reads across Atlassian products via the product APIs.
 >
 > Poke around, and when something clicks — *"oh, I want to build something like that"* — come back to your dev site and just tell Rovo Dev what you want.
 >
@@ -1236,10 +1267,10 @@ Structure of this final message: **graduation framing → Get inspired → the f
 >
 > Every question from here on — which module to use, what scope you need, how a Forge API works — ask Guru first. It searches [the official docs](https://developer.atlassian.com/platform/forge/) live and cites them, so you can trust the answer and follow the link.
 >
-> **The mental model you learned today** — manifest, modules & extension points, the Context Moat, and backend actions — works for every Forge app you'll ever build. When you see a big Marketplace Agent, decompose it into those pieces and it stops looking scary.
+> **The mental model you learned today** — the three building blocks (manifest, module, backend function) plus your working picture of the wider Atlassian platform Forge apps connect into — works for every Forge app you'll ever build. When you see a big Marketplace app, decompose it into those pieces and it stops looking scary.
 >
 > Have fun building. 🛠️
 
 **Reply with `done` (or just close the chat) when you're ready to wrap up. Or reply with any question — Guru is on the dev site now, but I'm here too.**
 
-This skill's job ends when the user has Forge Guru running on their dev site, has asked it at least one real Forge question and gotten a cited answer back, understands the four AI-native concepts, and knows exactly which door to knock on next in the four-stage journey.
+This skill's job ends when the user has Forge Guru running on their dev site, has asked it at least one real Forge question and gotten a cited answer back, understands the three building blocks (and the wider Atlassian platform Forge apps connect into), and knows exactly which door to knock on next in the four-stage journey.
