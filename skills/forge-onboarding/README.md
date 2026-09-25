@@ -124,6 +124,8 @@ This skill is only for **first-time** Forge users. Once you have Guru running, r
 
 This skill has no scripts of its own — it's purely instructional so the user sees each command as it runs and understands the mechanics. The one delegation is `scripts.create_forge_app` (from `forge-app-builder`) for the scaffold step, because `forge create` is interactive and hand-rolling it goes wrong in subtle ways. `forge deploy` and `forge install` are invoked directly with plain flags — see Steps 7 and 10 for the exact commands.
 
+**Runs on macOS, Windows, and Linux.** Node.js install (Step 1) delegates to Atlassian's official per-OS setup docs. The attribution env var (`ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding`) is set once at Step 1c using per-OS syntax (bash/zsh `export`, PowerShell `$env:`, or CMD `set`) and inherited by every subsequent `forge` call — no per-command prefixing that would break on Windows shells.
+
 ## See Also
 
 - [Forge documentation](https://developer.atlassian.com/platform/forge/)

@@ -70,6 +70,8 @@ Both skills must be installed together (the standard `forge-skills` plugin bundl
 cd <path-to>/skills/forge-app-builder && python3 -m scripts.create_forge_app --help
 ```
 
+*(On Windows, if `python3` isn't on your PATH, use `python` instead — same behavior. `&&` command chaining works in bash, zsh, PowerShell 7+, and CMD.)*
+
 It must exit cleanly with return code 0 and print usage/help text. If it fails (module not found, file not found, path resolution error), the `forge-app-builder` skill isn't correctly installed alongside this one. Tell the user: *"This onboarding skill relies on the `forge-app-builder` skill for the `forge create` scaffold step. The helper isn't resolving from your environment — check that `forge-app-builder` is installed alongside `forge-onboarding` (they ship together in the [`forge-skills` plugin bundle](https://github.com/atlassian/forge-skills)). If you cloned or symlinked skills individually, add `forge-app-builder` the same way. We can't continue until the helper is invokable."* Stop cold — do not fall back to raw `forge create` to try to work around the missing helper (raw `forge create` is interactive and asks questions the workshop shouldn't require).
 
 **Deploy and install commands are invoked directly in this skill** — see Step 7 (Loop 1) and Step 10 (Loop 2). They're plain, self-explanatory CLI calls; delegating them through a helper adds complexity without benefit. Read-only inspection commands (`forge --version`, `forge whoami`, `forge site provision`, `forge developer-spaces list`, `forge logs`) are also invoked directly.
@@ -126,7 +128,7 @@ Once the user has completed this onboarding, route future requests to the specia
 3. **Never deploy, install, provision a site, or accept Forge terms without explicit user confirmation.** Show the exact command and wait for a "yes."
 4. **Register every new app with `forge create`.** Never hand-build an app identity.
 5. **`forge create` is delegated; `forge deploy` and `forge install` are invoked directly.** The scaffold step is the one place where hand-rolled `forge create` invocations reliably go wrong (template name resolution, category prompts, interactive question order) — that's why `forge-app-builder`'s `scripts.create_forge_app` helper owns it. `forge deploy` and `forge install`, by contrast, are simple, self-explanatory CLI commands that the skill invokes directly with plain flags. This keeps the deploy/install path transparent (the user sees the exact command that runs), avoids helper-flag translation issues, and lets Loop 2's redeploy add `--upgrade --confirm-scopes` cleanly without needing a helper passthrough. Read-only identity/site/diagnostics commands (`forge --version`, `forge whoami`, `forge site provision`, `forge developer-spaces list`, `forge logs`) are also invoked directly.
-6. **Prefix any direct Forge CLI commands with `ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding`.** The `forge-app-builder` helper sets its own attribution, so no prefix is needed when you invoke it. Exclude interactive commands the user runs themselves (`forge login`, `forge tunnel`).
+6. **Attribution is set once as an env var at Step 1c, not prefixed per-command.** Every `forge` command the skill runs is tagged via `ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding`, but the tag is set as a shell env var once in Step 1c (with per-OS syntax for macOS/Linux/Windows) and inherited by every subsequent `forge` call. Do not add the prefix inline to individual commands — it clutters the copy and only works in POSIX shells. Exclude interactive commands the user runs themselves (`forge login`, `forge tunnel`).
 7. **Never modify the on-disk scaffold between Step 5 (`forge create`) and Step 9 (customize into Guru).** Step 6 (*"Take a look at what the scaffold gave us"*) is **pure chat narration** — the agent explains what each file is *for* using a concept summary, and points at the file path so a curious user can open it in their editor. **The agent does not write to `manifest.yml`, `src/index.js`, or any other scaffold file during Step 6.** No inline comments, no reformatting, no touching disk. This keeps the Step 8 first-deploy predictable, gives the user a clean baseline to compare against when we customize into Guru, and avoids YAML/JS syntax errors that could brick the first deploy. The first (and only) write to those files in this whole onboarding happens in Step 10's confirm-gates, when the user has approved a specific target file body.
 8. **Trust the skill for anything it pins down; only reach for the Forge MCP for things it doesn't.** Every command, flag, template name, category name, module name, prompt-answer, and manifest shape this onboarding needs is already spelled out inline (see the readiness tables in Steps 1, 2, 4, 5). **Do not re-verify what the skill already gives you — that wastes user time and adds no value.** Only reach for the Forge MCP (`mcp__forge__*` — `search-forge-docs`, `fetch-api-operation`, `get-api-required-scopes`, `list-forge-modules`, `list-ui-kit-components`, `get-ui-kit-component-reference`, `forge-development-guide`, `forge-app-manifest-guide`, `forge-backend-developer-guide`) when: (a) the skill explicitly tells you to, (b) the user asks about something the skill doesn't cover, or (c) a CLI command errors in a way suggesting the platform surface has changed. Only fall back to official Atlassian web docs when the MCP is unavailable. **Never rely on remembered CLI commands, flags, module names, template names, or scopes** — they change, and a hallucinated command is worse than no command. If you catch yourself about to type a Forge command from memory, stop and verify it with the MCP first.
 9. **Use least privilege.** Only add scopes and permissions the code actively needs, at the moment it needs them — never speculatively.
@@ -134,7 +136,8 @@ Once the user has completed this onboarding, route future requests to the specia
 11. **Never run `git` commands.** Do not `git init`, `git add`, `git commit`, `git push`, or any other git operation on the user's behalf during onboarding. Version control is the user's choice and their workflow — the skill's job ends at "app is running." If the user asks about source control, mention that most Forge devs `git init` inside the app directory but let *them* run it.
 12. **Narrate every `forge` command before running it.** Before executing any `forge` CLI command, the agent must tell the user in 1–2 short lines: (a) exactly which command is about to run, and (b) what it will do. No silent execution, even for read-only commands like `forge --version` or `forge whoami`. This builds the mental model of the CLI surface incrementally — by the end of the onboarding, the user has seen every command they'll use for the next year, explained in context.
 13. **Never change the pinned Guru `manifest.yml` string values without checking joined length.** The `manifest.yml` schema validator (invoked by `forge deploy`) caps the *joined* length of string fields like `description` and `prompt` at **255 characters**. YAML block-scalar folding (`>-`, `|`) joins multiple source lines into one string value, so *source-line* length is not what the validator sees. Before editing any pinned string in Section 9 (Guru target manifest), compute the joined length by folding `>-` values with single-space joins and preserving newlines for `|` values, then confirm every value stays ≤255 chars. If a string must grow, split its semantic content across multiple fields rather than lengthening one.
-14. **Collect every input a command needs before running it — no mid-command surprises.** Forge CLI commands are interactive; each one asks for specific inputs (email + token for `forge login`, app name + category + template for `forge create`, environment name for first `forge deploy`, site URL + product for `forge install`, etc.). Ask the user for these values *before* invoking the command so the flow through the interactive prompts is smooth and predictable. If the CLI ever surprises us with a question we didn't anticipate, treat that as a bug in this skill and add it to a future readiness checklist.
+14. **This skill runs on macOS, Windows, and Linux.** When any command differs by OS — Node.js install (Step 1a delegates to Forge's per-OS docs), env-var syntax (Step 1c sets one env var with per-OS shell syntax), tilde-vs-`%USERPROFILE%` paths (Step 4a lists OS-neutral choices), `python3` vs `python` (Step 5 dependency check notes the fallback) — give the correct shape for the user's OS. Never paste a POSIX-only command and hope for the best on Windows. If you don't know the user's OS, detect it via `node -e "console.log(process.platform)"` (returns `darwin`, `linux`, or `win32`) after Step 1a confirms Node is installed.
+15. **Collect every input a command needs before running it — no mid-command surprises.** Forge CLI commands are interactive; each one asks for specific inputs (email + token for `forge login`, app name + category + template for `forge create`, environment name for first `forge deploy`, site URL + product for `forge install`, etc.). Ask the user for these values *before* invoking the command so the flow through the interactive prompts is smooth and predictable. If the CLI ever surprises us with a question we didn't anticipate, treat that as a bug in this skill and add it to a future readiness checklist.
 
 ---
 
@@ -232,21 +235,11 @@ Run the three checks (`node -v`, `forge --version`, `forge whoami`) *first* to g
 node -v
 ```
 
-**If Node is not installed** (`command not found`):
+**If Node is not installed** (`command not found`) **or is too old**:
 
-> "You don't have Node.js installed. I can install it for you via `nvm` (Node Version Manager), which is the safest way — it lets you have multiple Node versions side-by-side. Or you can grab the Node 22 LTS installer from https://nodejs.org yourself. Want me to install nvm and Node 22 for you now?"
+> "Node.js isn't installed (or the version is too old). Forge officially supports macOS, Linux, and Windows — follow the tab for your OS on Atlassian's official [Forge setup docs](https://developer.atlassian.com/platform/forge/set-up-forge/#set-up-node-js). It covers `nvm` on macOS, `nvm` or the package manager on Linux, and the LTS installer on Windows. Come back here once `node --version` outputs a version ≥ 22."
 
-**On confirmation** (macOS/Linux — for Windows, recommend nvm-windows or the nodejs.org installer):
-
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-# reload shell (or restart terminal), then:
-nvm install 22
-nvm use 22
-node -v   # verify → v22.x.x
-```
-
-**If Node is installed but too old**: offer the same nvm-based upgrade.
+Once Node is installed, re-run `node --version` to confirm before moving on.
 
 ---
 
@@ -276,12 +269,41 @@ If the install fails with `EACCES` on macOS/Linux, mention: *"That's a global np
 
 ---
 
-**1c. Check the user is logged in.**
+**1c. Set the skill-attribution environment variable — once, for the whole session.**
+
+Every `forge` command the skill runs is tagged with an attribution env var so the Forge team can measure how often this skill is used. Set it once now in the current shell session and every subsequent `forge` command in this skill uses it automatically — no need to prefix each command.
+
+Detect the user's OS with a single Node.js probe (Node is guaranteed present after 1a):
+
+```bash
+node -e "console.log(process.platform)"
+```
+
+Then set the env var in the shape that matches the user's OS/shell:
+
+- **macOS / Linux (bash, zsh, etc.):**
+  ```bash
+  export ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  $env:ATL_FORGE_ATTRIBUTION_SKILL_NAME = "forge-onboarding"
+  ```
+- **Windows (CMD):**
+  ```cmd
+  set ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding
+  ```
+
+Set it once, then move on. If the agent's shell tool spawns a fresh shell for each command (i.e. env vars don't persist), fall back to prefixing each `forge` command inline with the appropriate per-OS syntax.
+
+---
+
+**1d. Check the user is logged in.**
 
 > "Now let's confirm you're logged in to Atlassian. Forge needs to know who you are so it can deploy apps under your account and track them in the Developer Console."
 
 ```bash
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge whoami
+forge whoami
 ```
 
 **If not logged in:**
@@ -433,8 +455,11 @@ Then run the two sub-beats in order.
 >
 > **Where on your disk would you like the `forge-guru/` folder to be created?**
 >
-> - Common choices: `~/atlassian-apps/` (dedicated to your Forge work), `~/dev/`, or wherever you already keep code projects.
-> - If you're not sure, I'll suggest **`~/atlassian-apps/`** — a clean home for every Forge app you'll build after today.
+> **Common choices:**
+> - **macOS / Linux:** `~/atlassian-apps/` (dedicated to Forge work), `~/dev/`, or wherever you keep code projects.
+> - **Windows:** `%USERPROFILE%\atlassian-apps\` (CMD), `$HOME\atlassian-apps\` (PowerShell), or wherever you keep code projects.
+>
+> If you're not sure, I'll suggest an **`atlassian-apps`** folder in your home directory — a clean home for every Forge app you'll build after today.
 
 Capture the answer as `<working-dir>`. If the directory doesn't exist, offer to create it (`mkdir -p <path>`) — get user permission first, and narrate what `mkdir -p` does (*"creates the folder, plus any missing parent folders, without complaining if it's already there"*).
 
@@ -463,7 +488,7 @@ Capture the answer as `<working-dir>`. If the directory doesn't exist, offer to 
 **Run:**
 
 ```bash
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge developer-spaces list --json
+forge developer-spaces list --json
 ```
 
 **Parse the JSON output and branch:**
@@ -505,7 +530,7 @@ Capture the URL as `<site-url>`. Say *"Got it — we'll install on `<site-url>` 
 Ask for permission, then run:
 
 ```bash
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge site provision
+forge site provision
 ```
 
 Two possible outcomes:
@@ -561,7 +586,7 @@ If any of the above is missing, ask the user for it *before* invoking the helper
 
 ```bash
 cd <path-to>/skills/forge-app-builder
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding python3 -m scripts.create_forge_app \
+python3 -m scripts.create_forge_app \
   --template rovo-agent-rovo \
   --name forge-guru \
   --dev-space-id <space-id> \
@@ -734,8 +759,8 @@ Two commands, run in sequence from the app directory. Use the app directory from
 
 ```bash
 cd <working-dir>/forge-guru
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge deploy --non-interactive
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge install --non-interactive --site <site-url> --product jira -e development
+forge deploy --non-interactive
+forge install --non-interactive --site <site-url> --product jira -e development
 ```
 
 **Loop 1 install has no `--upgrade` or `--confirm-scopes` flags** — this is a first-time install of an app that declares no permissions, so there's nothing to upgrade from and no scopes to confirm. Loop 2 (Step 10) adds those flags because Guru introduces a new external-fetch permission.
@@ -774,7 +799,7 @@ Move on to Step 7c once both have exited cleanly.
 `forge install list` is read-only — not app mutation — so this skill invokes it directly to confirm the install landed:
 
 ```bash
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge install list --json
+forge install list --json
 ```
 
 Parse the JSON. Confirm the app is installed on the right site under the `development` environment.
@@ -802,7 +827,7 @@ Walk the user into Rovo and get them to chat with the stock agent. **This is the
 > **To confirm the backend actually ran**, come back to your terminal and run:
 >
 > ```bash
-> ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge logs
+> forge logs
 > ```
 >
 > You should see the request from your handler. That's the full loop end-to-end: **you chatted → Rovo picked the action → Forge ran your function on Atlassian's servers → the reply came back.**
@@ -1100,8 +1125,8 @@ Same helper, second time. This is the daily-rhythm beat — the user sees that i
 
 ```bash
 cd <working-dir>/forge-guru
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge deploy --non-interactive --approve MAJOR_VERSION_RULE
-ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge install --non-interactive --upgrade --confirm-scopes --site <site-url> --product jira -e development
+forge deploy --non-interactive --approve MAJOR_VERSION_RULE
+forge install --non-interactive --upgrade --confirm-scopes --site <site-url> --product jira -e development
 ```
 
 **Success signals:**
@@ -1185,7 +1210,7 @@ Wait for confirmation, then advance to Step 12.
 > Let's look at what happened server-side. `forge logs` shows anything your function printed or any errors it threw. When Guru is working, `forge logs` is usually quiet — no news is good news. When it's not working, this is where the story is.
 >
 > ```bash
-> ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge logs
+> forge logs
 > ```
 >
 > **Common shapes of what you'll see:**
