@@ -8,6 +8,8 @@ Atlassian Forge lets you build and deploy apps directly on the Atlassian platfor
 
 The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the host can load:
 
+**Forge Onboarding** (`skills/forge-onboarding/`) guides a first-time Forge builder through two loops: deploy a stock Rovo Agent, then turn the same registered app into **Forge Guru**, a documentation companion. Use it for "my first Forge app", "my first Rovo Agent", or to resume the tutorial on an existing developer site.
+
 **Forge App Builder** (`skills/forge-app-builder/`) guides scaffolding through production: `forge create`, dev spaces and templates, deploy and install, module selection, cross-product scopes, and common CLI or permission issues.
 
 **Forge App Review** (`skills/forge-app-review/`) supports pre-deploy review and audits: security, architecture, cost and invocation efficiency, performance, and trigger or scheduling waste.
@@ -30,6 +32,7 @@ Provides Atlassian Design System lookup for Custom UI apps: component discovery,
 
 | Component                       | What it adds                                              | Examples                                                               |
 | ------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Forge Onboarding skill**      | Guided first-Forge-app tutorial with a two-loop journey   | Stock Rovo Agent, Forge Guru docs companion, resume onboarding          |
 | **Forge App Builder skill**     | Scaffold, deploy, install, module choice, CLI workflows   | `forge create`, environments, cross-product scopes                     |
 | **Forge App Review skill**      | Pre-deploy review: security, cost, architecture, triggers | Audit before release, reduce invocations, find misconfigurations       |
 | **Forge Cost Optimizer skill**  | Reduce Forge platform consumption and avoid waste         | Invocations, storage writes, logs, memory, triggers                    |
@@ -140,6 +143,7 @@ You should get a structured Forge workflow: developer space discovery, template 
 
 Optionally confirm the other skills are available:
 
+- **Onboarding:** e.g. “Onboard me to Forge” or “Build my first Rovo Agent.”
 - **Review:** e.g. “Review my Forge app for security and unnecessary trigger invocations before I deploy.”
 - **Debug:** e.g. “My Forge issue panel is blank after deploy -- help me trace it.”
 - **Security:** e.g. “Run a white-box security review on this Forge app and include CVSS-scored findings.”
@@ -172,6 +176,8 @@ You should get a structured walkthrough covering `graph:connector` app setup, `s
 
 Once the plugin is installed, try prompts like these:
 
+- `Onboard me to Forge and walk me through my first Rovo Agent.`
+- `Resume Forge onboarding on my existing developer site.`
 - `Create a Jira issue panel that shows related support tickets from an external API.`
 - `Build a Confluence macro that embeds an interactive chart with bar, line, and pie options.`
 - `Add a Jira dashboard gadget that summarizes open issues grouped by priority.`
@@ -187,6 +193,7 @@ Once the plugin is installed, try prompts like these:
 
 | Component                 | Default location                                                                               | Purpose                                                                        |
 | ------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **Forge Onboarding**      | `skills/forge-onboarding/`                                                                     | Guided first-Forge-app tutorial: stock Rovo Agent → Forge Guru (`SKILL.md`, README, references, assets) |
 | **Forge App Builder**     | `skills/forge-app-builder/`                                                                    | Create, deploy, install; helper scripts and tests                              |
 | **Forge App Review**      | `skills/forge-app-review/`                                                                     | Pre-deploy review and audits (`SKILL.md`, README)                              |
 | **Forge Cost Optimizer**  | `skills/forge-cost-optimizer/`                                                                 | Reduce Forge platform consumption across invocations, storage, logs, and memory |
@@ -217,7 +224,7 @@ forge whoami
 ### The agent is not using Forge skills
 
 - Make sure the plugin installed successfully in your host
-- Confirm the `skills/` directory includes `forge-app-builder`, `forge-app-review`, `forge-debugger`, `forge-connector`, and `forge-security-review` (each with a `SKILL.md` where applicable)
+- Confirm the `skills/` directory includes `forge-onboarding`, `forge-app-builder`, `forge-app-review`, `forge-debugger`, `forge-connector`, and `forge-security-review` (each with a `SKILL.md` where applicable)
 - Reload or restart your host so it re-indexes plugins and MCP configuration
 
 ### MCP tools are not showing up
