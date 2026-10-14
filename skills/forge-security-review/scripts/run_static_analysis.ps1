@@ -10,7 +10,12 @@ param(
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FsrtExe = Join-Path $ScriptDir 'fsrt.exe'
+# Pinned to a specific, immutable GitHub release tag on the atlassian-labs/FSRT
+# repository that Atlassian controls. The SHA-256 checksum below is verified
+# after download so a tampered or substituted release asset is rejected
+# before it is ever executed.
 $ArtifactUrl = 'https://github.com/atlassian-labs/FSRT/releases/download/forge-security-review-test/fsrt-tkallady-release-workflow-x86_64-pc-windows-msvc.zip'
+$ArtifactSha256 = '970C91957DF7DDBE23CC45716F16A88C10E8E080EFDC7B0DF2C3BDF726FFCD83'
 
 function Fail {
     param([string]$Message)
@@ -45,6 +50,13 @@ function Install-Fsrt {
         Write-Host "Artifact URL: $ArtifactUrl"
 
         Invoke-WebRequest -Uri $ArtifactUrl -OutFile $zipPath
+
+        $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+        if ($actualHash -ine $ArtifactSha256) {
+            Fail "Error: checksum mismatch for downloaded artifact.`n  Expected: $ArtifactSha256`n  Actual:   $actualHash"
+        }
+        Write-Host "Checksum verified: $actualHash"
+
         Expand-Archive -LiteralPath $zipPath -DestinationPath $unzippedDir -Force
 
         $searchRoot = $unzippedDir
