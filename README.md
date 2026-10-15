@@ -129,6 +129,16 @@ Then run `acli rovodev mcp` to edit your MCP configuration in your default edito
 
 Restart Rovo Dev for the skills and MCP to be available.
 
+### Neotask
+
+Install from [Neotask Construct](https://construct.neotask.ai/p/atlassian-forge-skills) with the Neotask CLI, or from the Neotask desktop app under Agents > Skills > Add-ons:
+
+```bash
+neotask construct install atlassian-forge-skills
+```
+
+Neotask installs the skills without the Forge and ADS MCP servers, so the skills fall back to the Forge documentation and Forge CLI.
+
 ## Verify the installation
 
 After install, try four quick checks.
