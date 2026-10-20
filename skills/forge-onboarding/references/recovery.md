@@ -21,14 +21,15 @@ or established transient cause, never in a blind loop.
 | Already installed | Verify app/site/product/environment/version; upgrade only if needed and authorized. | Installation verification |
 | Install/upgrade times out | Inspect current installation and timeout output first. Establish whether the intended version is installed or a retry is appropriate; retain matching authorization. | Installation verification or authorized retry |
 | Agent absent/Rovo inactive | Verify install and activation; allow propagation. A new site needs a resolved target and scope. | Live check |
-| No function logs | Check wiring and action invocation; quiet logs prove neither success nor failure. | Live action check |
-| Guru returns starting links or HTTP/JSON error | Check route response and source value; fallback is not successful search. | Guru backend/live check |
+| No function logs | Check wiring and action invocation; quiet logs prove neither success nor failure. | Live Guru check |
+| Guru returns empty or irrelevant links | Inspect the action payload and `search-forge-docs` output; the backend always returns three links, so an empty result means the handler did not run. | Guru backend/live check |
 
 For backend failures, narrate `forge logs -e development`. Avoid posting verbose payloads
 or credentials. Fix narrow issues within authorization; route sustained diagnosis to
 `forge-debugger` with failure, current phase, targets and attempted recovery.
 
 When blocked, state what succeeded, what failed, and the input or external change needed.
-A missing site blocks installation, not all local work. Exit stops recovery too.
+A missing site blocks the full flow — install needs it. Exit stops recovery too.
 Cleanup, uninstalling, deleting registrations, accepting terms and changing targets are
-never implied by "retry".
+never implied by "retry". If any target changes during recovery, re-ask for the bundled
+authorization against the new scope rather than quietly reusing the original approval.
