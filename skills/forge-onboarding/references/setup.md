@@ -1,9 +1,10 @@
-# Set up your local machine
+# Setup — environment, targets, and the one authorization
 
-Read when prerequisites are unknown or a command fails because a tool or login is missing.
-On "skip setup", reuse known results and run only checks required for the next operation.
+Read at the start of a run, or when a tool/login failure interrupts a later phase. On
+"skip setup" during resume, reuse known results and run only checks required for the
+next operation.
 
-## Inspect before changing anything
+## 1. Verify the local environment
 
 Explain and run these read-only checks, independently where practical:
 
@@ -13,41 +14,75 @@ forge --version
 forge whoami
 ```
 
-Apply the attribution environment below to agent-run Forge commands. Detect shell/OS from
-the host; if unknown and Node works, `node -e "console.log(process.platform)"` can confirm OS.
+Apply the attribution env var below to agent-run Forge commands. Detect shell/OS from
+the host; if unknown and Node works, `node -e "console.log(process.platform)"` can confirm.
 Do not print token values or inspect credential stores.
 
-Read the setup row in [Platform contract](platform-contract.md) to compare actual versions
-with supported releases. "Node ≥22" is insufficient: a newer release may be unsupported.
-Distinguish a warning with exit code 0 from a failed command.
+Compare versions with the setup row in [Platform contract](platform-contract.md).
+Distinguish a warning (exit 0) from a failed command. If the user accepts a warning and
+asks to continue, record it and move on.
 
-If the user accepts a warning and asks to continue, record that choice and proceed. Do not
-install another Node version or keep asking about it unless a relevant command fails.
+If a required tool is missing or login failed, use [Recovery](recovery.md). The usual
+CLI repair is `npm install -g @forge/cli@latest`. For login, have the user run
+`forge login` in their own terminal and rerun `forge whoami` after.
 
-## Repair an actual missing prerequisite
+Python is needed for the sibling creation helper. Probe `python3 --version` or
+`python --version`; do not install both.
 
-Explain the proposed change and use existing authorization for it, or ask before changing
-global tools. Use the official OS-specific setup instructions in the platform contract.
-Inspect an existing version manager before proposing an installation or changing defaults.
-If the CLI is missing or cannot support the required command, the usual install is:
+## 2. Collect the targets
+
+Everything the build needs, gathered now so build can run uninterrupted:
+
+- **Parent directory** for the app. Resolve an absolute path; propose `forge-guru/` as
+  the destination. Check whether it exists (including symlinks). If it exists, inspect
+  for a resumable app or choose another destination with the user. Never remove it to
+  make scaffolding succeed.
+- **Developer Space.** Run `forge developer-spaces list --json` and let the user choose
+  if there are multiple. If none exist, link
+  [Developer Console](https://developer.atlassian.com/console/myapps) and wait.
+- **Test site** (required — install needs it). Use a site where Rovo is activated. Prefer
+  a dedicated development site. If the user has no site, explain and obtain authorization
+  for `forge site provision`; read the provision row in
+  [Platform contract](platform-contract.md), run it, and record the returned URL, status,
+  and expiry. Do not promise a permanent site.
+- **Product.** Default to Jira unless the user picked another supported product.
+
+## 3. Verify the sibling helper
+
+The scaffold runs through `forge-app-builder`'s creation helper. Smoke-test it once from
+the builder skill directory:
 
 ```sh
-npm install -g @forge/cli@latest
+python3 -m scripts.create_forge_app --help
 ```
 
-Recheck only the repaired prerequisite. Python is required when scaffolding through the
-sibling helper, not for teaching. Probe `python3 --version` or `python --version` when
-creation becomes relevant; do not install both.
+If help fails, inspect path/interpreter and either resolve or jump to [Recovery](recovery.md).
+Never substitute agent-run raw `forge create`.
 
-If authentication is missing, have the user run `forge login` in their own terminal.
-Point them to [Atlassian API tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
-if needed. Never collect the email/token pair in chat or feed credentials through tools.
-After they finish, rerun `forge whoami` and record the account.
+Use `rovo-agent-rovo` as the template slug. Validate with
+`scripts.list_templates --validate` and reconcile with official Rovo guidance if results
+disagree. Never substitute a blank or UI template.
+
+## 4. Get the one bundled authorization
+
+Disclose the full build scope once and get approval. Example wording:
+
+> I'm about to do the following, in sequence, without pausing between steps:
+>
+> 1. **Scaffold** a new Forge app at `<absolute-parent>/forge-guru` under Developer
+>    Space `<space-name>`. This registers an external app and accepts the Forge terms
+>    non-interactively via `--accept-terms`.
+> 2. **Customize** it into Forge Guru by replacing the generated manifest and backend
+>    with the Guru assets.
+> 3. **Deploy** to the `development` environment.
+> 4. **Install** on `<site-host>` for `<product>`.
+>
+> After you approve, I'll run all four and report progress as I go. Approve?
+
+Record the authorization against this exact scope. If any target changes later, re-ask.
+Terms consent is disclosed here as part of step 1 — do not treat it as implicit.
 
 ## Attribution
-
-This variable attributes direct agent-run CLI calls to onboarding. Set it once only if the
-shell persists; otherwise supply it in each command's environment.
 
 | Shell | Syntax |
 | --- | --- |
@@ -55,13 +90,11 @@ shell persists; otherwise supply it in each command's environment.
 | PowerShell | `$env:ATL_FORGE_ATTRIBUTION_SKILL_NAME = "forge-onboarding"` |
 | CMD | `set ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding` |
 
-For a fresh POSIX shell, an inline assignment such as
-`ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge whoami` is valid.
-Do not paste POSIX assignments into PowerShell or assume environment changes survive a tool call.
-The sibling creation helper uses its own builder tag; see the main skill's dependency rule.
+For a fresh POSIX shell, an inline assignment like
+`ATL_FORGE_ATTRIBUTION_SKILL_NAME=forge-onboarding forge whoami` is valid. The sibling
+creation helper uses its own builder tag; see the main skill's dependency rule.
 
-## Transition
+## Advance
 
-Report versions and authenticated identity compactly. Continue to `orientation`, or directly
-to `scaffold` if teaching was skipped. If a required executable or login still fails, explain
-that concrete blocker; do not label the environment ready.
+With tools verified, targets collected, and the bundled authorization recorded, move
+directly to [`build`](build.md).

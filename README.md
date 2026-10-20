@@ -8,7 +8,7 @@ Atlassian Forge lets you build and deploy apps directly on the Atlassian platfor
 
 The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the host can load:
 
-**Forge Onboarding** (`skills/forge-onboarding/`) guides a first-time Forge builder through two loops: deploy a stock Rovo Agent, then turn the same registered app into **Forge Guru**, a documentation companion. Use it for "my first Forge app", "my first Rovo Agent", or to resume the tutorial on an existing developer site.
+**Forge Onboarding** (`skills/forge-onboarding/`) guides a first-time Forge builder through one continuous run: scaffold a Rovo Agent, customize it into **Forge Guru** — an agent that answers Forge questions from the official docs — then deploy and install it on their test site. One authorization gate up front, no mid-build prompts. Use it for "my first Forge app", "my first Rovo Agent", or to resume the tutorial on an existing developer site.
 
 **Forge App Builder** (`skills/forge-app-builder/`) guides scaffolding through production: `forge create`, dev spaces and templates, deploy and install, module selection, cross-product scopes, and common CLI or permission issues.
 
@@ -193,7 +193,7 @@ Once the plugin is installed, try prompts like these:
 
 | Component                 | Default location                                                                               | Purpose                                                                        |
 | ------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **Forge Onboarding**      | `skills/forge-onboarding/`                                                                     | Guided first-Forge-app tutorial: stock Rovo Agent → Forge Guru (`SKILL.md`, README, references, assets) |
+| **Forge Onboarding**      | `skills/forge-onboarding/`                                                                     | Guided first-Forge-app tutorial: scaffold → customize → deploy → install Forge Guru on your test site, with one authorization gate (`SKILL.md`, README, references, assets) |
 | **Forge App Builder**     | `skills/forge-app-builder/`                                                                    | Create, deploy, install; helper scripts and tests                              |
 | **Forge App Review**      | `skills/forge-app-review/`                                                                     | Pre-deploy review and audits (`SKILL.md`, README)                              |
 | **Forge Cost Optimizer**  | `skills/forge-cost-optimizer/`                                                                 | Reduce Forge platform consumption across invocations, storage, logs, and memory |
