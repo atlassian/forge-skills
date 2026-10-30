@@ -1,0 +1,17 @@
+# Analysis fixture, not a deployable app.
+modules:
+  jira:issuePanel:
+    - key: simple-panel
+      displayConditions:
+        isLoggedIn: true
+        isSiteAdmin: true
+    - key: flat-object-panel
+      displayConditions:
+        or:
+          isLoggedIn: true
+          isSiteAdmin: true
+    - key: array-panel
+      displayConditions:
+        or:
+          - hasGlobalPermission: ADMINISTER
+          - hasGlobalPermission: CREATE_PROJECT

@@ -24,6 +24,7 @@ This skill is the review front door. It checks whether a Forge app looks ready t
 - Use `forge-security-review` for deep security audit, SAST, authz, secrets, tenant isolation, exploitability, and CVSS reporting.
 - Use `forge-cost-optimizer` for reducing invocations, GB-seconds, storage/log volume, trigger frequency, memory, and Forge platform consumption.
 - Use `forge-debugger` for known failures, error messages, blank UI, deploy/install problems, resolver errors, tunnel/log diagnosis, and apps that stopped working.
+- Use `forge-display-conditions` for array-based simplifications of legacy Jira/JSM manifest conditions. A broad review may suggest this as an optional readability improvement, but existing object syntax is not a blocker.
 
 ## What It Checks
 

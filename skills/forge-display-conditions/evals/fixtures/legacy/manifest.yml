@@ -1,0 +1,19 @@
+# Analysis fixture, not a deployable app.
+modules:
+  jira:issuePanel:
+    - key: permission-panel
+      displayConditions:
+        or:
+          hasGlobalPermission: ADMINISTER # Keep this explanation when applying.
+          or:
+            hasGlobalPermission: CREATE_PROJECT
+    - key: property-panel
+      displayConditions:
+        and:
+          entityPropertyExists:
+            entity: user
+            propertyKey: a
+          and:
+            entityPropertyExists:
+              entity: user
+              propertyKey: b

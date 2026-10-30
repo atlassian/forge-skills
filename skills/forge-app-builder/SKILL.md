@@ -36,6 +36,7 @@ Choose one primary route before loading implementation guidance:
 | Broad pre-deploy or release-readiness review                        | Route to `forge-app-review`                                                    |
 | Deep security review or static analysis                             | Route to `forge-security-review`                                               |
 | Cost or platform-consumption optimization                           | Route to `forge-cost-optimizer`                                                |
+| Simplify or analyze display condition expressions                   | Route to `forge-display-conditions`                                            |
 | Teamwork Graph connector                                            | Route to `forge-connector`                                                     |
 
 Continue here when diagnosis or review is incidental to active build work. If the route is unclear, inspect the workspace before asking the user.

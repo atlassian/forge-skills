@@ -22,6 +22,8 @@ The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the hos
 
 **Forge Security Review** (`skills/forge-security-review/`) performs white-box Forge app security audits with rule-driven checks for authz, injection, tenant isolation, secrets handling, egress/remotes, web triggers, and optional static-analysis workflows.
 
+**Forge Display Conditions** (`skills/forge-display-conditions/`) suggests simpler, equivalent array-based `and`/`or`/`not` display conditions for Jira/JSM manifests. A read-only analyzer checks Boolean equivalence; edits require an explicit request. Existing readable expressions stay unchanged.
+
 ### Forge MCP Server
 
 Gives your agent access to up-to-date Forge documentation, template registries, module configuration, manifest syntax, and UI Kit/backend API guides -- so its knowledge stays current rather than relying on training data.
@@ -39,6 +41,7 @@ Provides Atlassian Design System lookup for Custom UI apps: component discovery,
 | **Forge Debugger skill**        | Diagnose deploy, runtime, UI, and permission issues       | Logs, blank panels, resolver errors, missing app in UI                 |
 | **Forge Connector skill**       | Ingest external data into Teamwork Graph / Rovo           | graph:connector, setObjects, Rovo Search, Rovo Chat                    |
 | **Forge Security Review skill** | White-box security audits and exploitability reporting    | AuthZ bypasses, injection, tenant isolation, static analysis workflows |
+| **Forge Display Conditions skill** | Suggest equivalent Jira/JSM display-condition arrays   | Nested conditions, composite arrays, equivalence checks                |
 | **Forge MCP Server**            | Live Forge documentation and tooling                      | Template lookup, manifest syntax, UI Kit guides, backend API reference |
 | **ADS MCP Server**              | Atlassian Design System lookup                            | Component discovery, token reference, icon lookup (Custom UI only)     |
 
@@ -51,6 +54,14 @@ Before you install, make sure you have:
 - **Python 3** available on your PATH (used by helper scripts)
 
 ## Install
+
+To install only the display-condition simplification skill:
+
+```bash
+npx skills add atlassian/forge-skills --skill forge-display-conditions
+```
+
+Its local analyzer requires Python 3.11+ and PyYAML; see the [skill setup instructions](skills/forge-display-conditions/README.md). The full plugin installations below include the skill automatically.
 
 ### Claude Code
 
@@ -178,6 +189,7 @@ Once the plugin is installed, try prompts like these:
 
 - `Onboard me to Forge and walk me through my first Rovo Agent.`
 - `Resume Forge onboarding on my existing developer site.`
+- `Review my Forge manifest for simplifying display conditions.`
 - `Create a Jira issue panel that shows related support tickets from an external API.`
 - `Build a Confluence macro that embeds an interactive chart with bar, line, and pie options.`
 - `Add a Jira dashboard gadget that summarizes open issues grouped by priority.`
@@ -200,6 +212,7 @@ Once the plugin is installed, try prompts like these:
 | **Forge Connector**       | `skills/forge-connector/`                                                                      | Build graph:connector apps; ingest data into Teamwork Graph (SKILL.md, README) |
 | **Forge Debugger**        | `skills/forge-debugger/`                                                                       | Troubleshooting and diagnostics (`SKILL.md`, README)                           |
 | **Forge Security Review** | `skills/forge-security-review/`                                                                | White-box security audits with rule assets (`SKILL.md`, README, assets/)       |
+| **Forge Display Conditions** | `skills/forge-display-conditions/`                                                         | Suggest verified composite-array simplifications (`SKILL.md`, README, scripts) |
 | **MCP config**            | `mcp.json`, `.mcp.json`                                                                        | Forge MCP Server and ADS MCP Server configuration                    |
 | **Plugin manifests**      | `plugin.json`, `.plugin/`, `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `gemini-extension.json` | Per-host plugin metadata and MCP wiring                 |
 
@@ -224,7 +237,7 @@ forge whoami
 ### The agent is not using Forge skills
 
 - Make sure the plugin installed successfully in your host
-- Confirm the `skills/` directory includes `forge-onboarding`, `forge-app-builder`, `forge-app-review`, `forge-debugger`, `forge-connector`, and `forge-security-review` (each with a `SKILL.md` where applicable)
+- Confirm the `skills/` directory includes `forge-onboarding`, `forge-app-builder`, `forge-app-review`, `forge-debugger`, `forge-connector`, `forge-display-conditions` and `forge-security-review` (each with a `SKILL.md` where applicable)
 - Reload or restart your host so it re-indexes plugins and MCP configuration
 
 ### MCP tools are not showing up
