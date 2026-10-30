@@ -8,7 +8,7 @@ Context
 
 - Forge Custom UI apps can configure CSP via `permissions.content` in manifest.yml. Unsafe directives like `unsafe-inline` and `unsafe-eval` enable XSS attacks.
 - Related CWE: CWE-16 (Configuration), CWE-79 (XSS via CSP bypass).
-- Only ~23% of Forge apps enable `unsafe-inline`; these require extra scrutiny.
+- Apps that enable `unsafe-inline` or `unsafe-eval` for scripts require extra scrutiny.
 
 Scope & Signals
 
@@ -145,6 +145,10 @@ Remediation Guidance (advisory)
 - Audit necessity of each external source.
 - Use subresource integrity (SRI) for external scripts where possible.
 - If `unsafe-inline` is truly required, document the justification and ensure no XSS sinks exist.
+
+Deterministic Signals (OpenGrep rules)
+
+- `forge-manifest-csp-unsafe-script-directive` (WARNING): `unsafe-eval` or `unsafe-inline` listed under `permissions.content.scripts` (style `unsafe-inline`, `wasm-unsafe-eval` and external script host lists are not reported). The rule only shows that the script policy is relaxed. Use it to decide how closely to review Custom UI HTML sinks (`@forge-injection/xss.mdc`) and `eval` / `new Function` use (`@forge-injection/rce-code-execution.mdc`); report the manifest setting as hardening unless an exploitable sink exists.
 
 Reporting Guidance
 

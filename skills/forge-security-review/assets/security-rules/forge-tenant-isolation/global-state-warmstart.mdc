@@ -174,6 +174,12 @@ Remediation Guidance (advisory)
 - Avoid module-level variables for anything tenant-specific.
 - Consider short TTLs on caches to limit exposure window.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-module-state-holds-request-data` (WARNING): request, tenant or storage data is written into a module-scope variable in backend code (client-side directories are excluded). On a warm instance the next invocation, possibly from another tenant, reads it. Confirm that the variable is read on a later invocation and that its key is not tenant-scoped before reporting; a per-invocation cache reset at handler start is hardening advice only.
+- `forge-process-env-mutation` (ERROR): backend code assigns into `process.env`, which persists across invocations on the same instance. Browser polyfills and instrumentation idioms are excluded.
+- `forge-private-cross-tenant-api` (ERROR): a call to `__requestAtlassian`, the private API that historically allowed requests against another tenant.
+
 Reporting Guidance
 
 - Document module-level variables and their contents.

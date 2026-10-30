@@ -135,6 +135,11 @@ Detection Process
 6. If any likely such use is found, flag the function for review
 ```
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-context-identifier-payload-fallback` (ERROR): `context.extension.<id> ?? payload.<id>` (or `||`). When the context field is absent, or the resolver is invoked directly, the caller chooses the object the handler acts on.
+- `forge-payload-identity-trusted` (WARNING): an authorization branch keyed on a payload identity or role field (`payload.isAdmin`, `payload.role === 'admin'`, `payload.accountId`). The client controls these values; confirm the decision is not also made from `context` before reporting.
+
 Reporting Guidance
 
 - Call out functions which are passing context-object information in their payloads. Prioritize functions based on

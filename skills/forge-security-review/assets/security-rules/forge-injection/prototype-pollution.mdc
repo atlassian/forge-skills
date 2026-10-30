@@ -137,6 +137,10 @@ Remediation Guidance (advisory)
 - Update lodash to 4.17.21+ and other merge libraries.
 - Freeze prototypes in sensitive contexts: `Object.freeze(Object.prototype)`.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-payload-merge-prototype-pollution` (ERROR): the resolver payload, or a field of it, is deep-merged or copied key by key into another object (`_.merge`, `merge`, `deepmerge`, `mergeWith`, `defaultsDeep`, `Object.assign`, `extend`, a `for...in` copy). Schema `.parse()` / `.safeParse()`, `pick()` and `omit(..., ['__proto__', ...])` are sanitisers.
+
 Reporting Guidance
 
 - Document the merge/assignment pattern and untrusted data source.

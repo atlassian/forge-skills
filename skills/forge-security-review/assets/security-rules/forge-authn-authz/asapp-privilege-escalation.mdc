@@ -9,7 +9,6 @@ Context
 - `asApp()` operates with the app's full permissions, which typically exceed those of `asUser()`. This creates privilege escalation risks when asApp is used without verifying the requesting user has permission for the action.
 - For user-invoked actions, default to `asUser()` when possible. If `asApp()` is required, perform explicit permission verification for the same target resource before the `asApp()` sink.
 - Related CWE: CWE-269 (Improper Privilege Management), CWE-862 (Missing Authorization).
-- Past issues: EPSP-301, VULN-1628326 (Rovo A4J elevated privileges).
 
 Scope & Signals
 
@@ -160,10 +159,16 @@ Remediation Guidance (advisory)
 - Document why asApp is necessary for each use case.
 - Consider using the Authorize API or explicit permissions API pattern for sensitive mutations.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-asapp-user-input-in-path` (ERROR): a value from the resolver payload, request body or web trigger event reaches the URL of an `asApp()` product request. It proves the caller controls the object the app acts on with the app's own privileges; it cannot see an authorization check made before the call. Confirm whether the referenced id is permission-checked (for example `/rest/api/3/permissions/check` or the Authorize API), then report IDOR / privilege misuse or downgrade.
+- `forge-asapp-query-in-request-body` (ERROR): payload data reaches the `jql`, `cql`, `query` or `expression` field of a POST body sent through `asApp()` (the current search APIs). Same confirmation as above.
+- FSRT's authorization checker reports `asApp()` reachable from an invokable function without the Authorize API; it is broader (no taint tracking) and complements the rules.
+
 Reporting Guidance
 
 - Cite specific resolver/function and the asApp call site.
 - Document the missing authorization check and the potential impact (IDOR, privilege escalation).
 - Provide test case with resource ID manipulation.
-- Map to CWE-269, CWE-862; reference EPSP-301 pattern.
+- Map to CWE-269, CWE-862.
 

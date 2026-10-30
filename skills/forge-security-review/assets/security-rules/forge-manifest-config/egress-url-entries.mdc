@@ -98,6 +98,10 @@ const result = await fetch(
 };
 ```
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-manifest-dev-tunnel-egress` (ERROR): a developer tunnel host (`ngrok`, `localtunnel`, `trycloudflare`, `serveo` and similar) in `permissions.external`. These belong to a development session, not a published app.
+
 Reporting Guidance
 
 - Call out any usages of flagged URIs being used in ways similar to the analysis patterns

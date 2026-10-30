@@ -1,0 +1,2622 @@
+# Forge security rules for OpenGrep
+#
+# Deterministic checks for Atlassian Forge apps. Taint rules follow request data into asApp()
+# routes, fetch and invokeRemote URLs, JQL/CQL, Forge SQL, storage keys, request headers and HTML
+# sinks. Further rules cover web trigger authentication, module-scope request state, sandbox
+# escapes, secrets returned to the client or kept in plain storage, Basic auth with API tokens,
+# client-chosen authorization targets, prototype pollution through payload merges, the private
+# cross-tenant API, installation-wide writes without a permission check, model output driving
+# privileged actions, and manifest settings (anonymous access, wildcard and tunnel egress,
+# unsafe script CSP directives).
+#
+# Conventions used by every rule in this file:
+#   * fire on the defect itself, not on a name or an inventory signal
+#   * taint sources are identifiers (payload, req.payload, event.body ...), never a whole
+#     destructuring pattern, so `context` / `installContext` are not tainted by accident
+#   * sinks focus on the dangerous argument (focus-metavariable) so request bodies and
+#     options objects do not trigger URL rules
+#   * path excludes are spelled out per extension (OpenGrep 1.16.2 does not expand `{js,ts}`
+#     brace globs)
+#   * manifest rules are regex-based so they work on a YAML manifest and on a single-line JSON one
+#   * severity reflects what the rule can prove: ERROR means the matched code is the defect;
+#     WARNING means the message says what the reviewer must still confirm
+#
+# metadata.skill_rule names the rule file under assets/security-rules/ that the agent applies
+# to each hit before reporting it. metadata.security-severity is a CVSS-style ordering hint,
+# not the reported score; the agent still scores every confirmed finding with CVSS v3.1.
+#
+# The rules use Semgrep rule syntax and run on OpenGrep, an open-source Semgrep-compatible
+# engine. No Semgrep registry rules or account are involved.
+#
+# Run with scripts/run_static_analysis.sh (pinned OpenGrep, JSON + SARIF output). Validate
+# with: opengrep --validate --config assets/opengrep-rules
+# Fixtures and expected results live in evals/.
+
+rules:
+
+# ---------------------------------------------------------------------------------------------
+# asApp() request path carries user-controlled data (IDOR / privilege misuse)
+# Taint: resolver payload, web trigger request fields and event bodies reaching the URL of an
+# asApp() product request, including JQL/CQL in the query string. Paging and shaping parameters
+# (maxResults, startAt, fields ...) are treated as sanitised: they cannot select another object.
+# ---------------------------------------------------------------------------------------------
+- id: forge-asapp-user-input-in-path
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    User-controlled data reaches the URL of an asApp() product request. asApp() runs with the
+    app's own scopes and skips the caller's permissions, so a caller can read or modify objects
+    they cannot access themselves (IDOR), including through JQL/CQL in the query string. Use
+    asUser() for caller-driven requests, or verify the caller's permission on the referenced
+    object (for example /rest/api/3/permissions/check) before calling asApp().
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/asapp-privilege-escalation.mdc"
+    cwe: ["CWE-639", "CWE-863"]
+    confidence: HIGH
+    security-severity: "8.5"
+    forge_surface: "@forge/api asApp()"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/*.test.mjs"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.tsx"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: payload
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+        - pattern-not-inside: |
+            let payload = $V;
+            ...
+    - patterns:
+        - pattern: $REQ.payload
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: $P
+    - patterns:
+        - pattern-either:
+            - pattern: $EVENT.body
+            - pattern: $EVENT.queryParameters
+            - pattern: $EVENT.headers
+            - pattern: $EVENT.path
+        - metavariable-regex:
+            metavariable: $EVENT
+            regex: "^(event|evt|e|req|request|webtriggerEvent)$"
+  pattern-sanitizers:
+    # paging / shaping parameters are not object identifiers; they cannot select another
+    # principal's object
+    - patterns:
+        - pattern: $V
+        - metavariable-regex:
+            metavariable: $V
+            regex: "(?i)(^|\\.)(maxResults|startAt|start|limit|offset|pageSize|cursor|orderBy|expand|fields|page|pageToken|nextPageToken)$"
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: api.asApp().requestJira($URL, ...)
+            - pattern: api.asApp().requestConfluence($URL, ...)
+            - pattern: api.asApp().requestBitbucket($URL, ...)
+            - pattern: api.asApp().requestCompass($URL, ...)
+            - pattern: api.asApp().requestGraph($URL, ...)
+            - pattern: api.asApp().fetch($URL, ...)
+            - pattern: $API.asApp().requestJira($URL, ...)
+            - pattern: $API.asApp().requestConfluence($URL, ...)
+            - pattern: $API.asApp().requestBitbucket($URL, ...)
+            - pattern: $API.asApp().requestCompass($URL, ...)
+            - pattern: $API.asApp().requestGraph($URL, ...)
+            - pattern: $API.asApp().fetch($URL, ...)
+        - focus-metavariable: $URL
+
+# ---------------------------------------------------------------------------------------------
+# @forge/api fetch() with a user-controlled URL (SSRF inside the egress allowlist)
+# Taint on the URL argument only. encodeURIComponent and lookups in a constant table count as
+# sanitisers.
+# ---------------------------------------------------------------------------------------------
+- id: forge-api-fetch-tainted-url
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    User-controlled data reaches the URL of a @forge/api fetch(). The manifest egress list
+    bounds the hosts, but a caller can still pick any path on an allowed host or reach a
+    wildcard egress target (SSRF). Build the URL from constants, map user input through an
+    allowlist, and pass user values only as validated query parameters.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/ssrf.mdc"
+    cwe: ["CWE-918"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "@forge/api fetch"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.tsx"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: payload
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+        - pattern-not-inside: |
+            let payload = $V;
+            ...
+    - patterns:
+        - pattern: $REQ.payload
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: $P
+    - patterns:
+        - pattern-either:
+            - pattern: $EVENT.body
+            - pattern: $EVENT.queryParameters
+            - pattern: $EVENT.headers
+        - metavariable-regex:
+            metavariable: $EVENT
+            regex: "^(event|evt|e|req|request|webtriggerEvent)$"
+  pattern-sanitizers:
+    # an encoded value cannot change host or path segments
+    - pattern: encodeURIComponent(...)
+    - pattern: Number(...)
+    # lookup in an upper-case constant table is an allowlist
+    - patterns:
+        - pattern: $TABLE[$K]
+        - metavariable-regex:
+            metavariable: $TABLE
+            regex: "^[A-Z][A-Z0-9_]*$"
+    - patterns:
+        - pattern: $TABLE.get($K)
+        - metavariable-regex:
+            metavariable: $TABLE
+            regex: "^[A-Z][A-Z0-9_]*$"
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: api.fetch($URL, ...)
+            - pattern: api.asApp().fetch($URL, ...)
+            - pattern: api.asUser().fetch($URL, ...)
+            - pattern: $API.asApp().fetch($URL, ...)
+            - pattern: $API.asUser().fetch($URL, ...)
+        - focus-metavariable: $URL
+
+# ---------------------------------------------------------------------------------------------
+# Web trigger handler processes the request without any authentication evidence
+# Matches exported handlers that read request fields and contain no authentication code (HMAC,
+# signature, JWT verification, shared secret, API key header, authorize/authenticate helper).
+# The rule cannot tell web triggers from other event consumers: correlate each hit with the
+# manifest webtrigger modules.
+# ---------------------------------------------------------------------------------------------
+- id: forge-webtrigger-missing-auth
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Exported handler reads the incoming web trigger request (body, headers, query) and shows
+    no authentication step. Web trigger URLs are reachable by anyone who learns them. Verify a
+    signature (HMAC with crypto.timingSafeEqual), a JWT, or a shared secret from
+    storage.getSecret() before acting on the request, and return 401 on failure. Confirm the
+    function is declared under a webtrigger module in manifest.yml before reporting.
+  metadata:
+    skill_rule: "assets/security-rules/forge-webtrigger-entrypoints/webtrigger-security.mdc"
+    cwe: ["CWE-306", "CWE-862"]
+    confidence: MEDIUM
+    security-severity: "8.0"
+    forge_surface: "webtrigger module"
+    requires_manifest_correlation: true
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.test.mjs"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.config.js"
+      - "**/*.config.ts"
+      - "**/*.config.mjs"
+  patterns:
+    - pattern-either:
+        - pattern: export const $H = async ($EVENT, ...) => { $...BODY }
+        - pattern: export const $H = ($EVENT, ...) => { $...BODY }
+        - pattern: export async function $H($EVENT, ...) { $...BODY }
+        - pattern: export function $H($EVENT, ...) { $...BODY }
+        - pattern: exports.$H = async ($EVENT, ...) => { $...BODY }
+        - pattern: exports.$H = ($EVENT, ...) => { $...BODY }
+        - pattern: module.exports.$H = async ($EVENT, ...) => { $...BODY }
+        - pattern: module.exports.$H = ($EVENT, ...) => { $...BODY }
+    - metavariable-regex:
+        metavariable: $EVENT
+        regex: "^(event|evt|ev|e|req|request|webtriggerEvent|webTriggerEvent|trigger|input)$"
+    - metavariable-pattern:
+        metavariable: $...BODY
+        pattern-either:
+          - pattern: $EVENT.body
+          - pattern: $EVENT.headers
+          - pattern: $EVENT.queryParameters
+          - pattern: $EVENT.path
+          - pattern: "const { ..., body, ... } = $EVENT"
+          - pattern: "const { ..., headers, ... } = $EVENT"
+          - pattern: "const { ..., queryParameters, ... } = $EVENT"
+          - pattern: "JSON.parse($EVENT.body)"
+    # authentication evidence must look like code (a call, or a read of an inbound auth header),
+    # so comments such as "no authentication check" do not suppress the finding
+    - pattern-not-regex: "(?i)\\b(verify\\w*|validate\\w*(token|secret|signature|auth|hmac|request|webhook)\\w*|authenticate\\w*|authoriz\\w*|requireauth\\w*|checkauth\\w*|isauthorized|isauthenticated|ensureauth\\w*|assertauth\\w*|timingsafeequal|createhmac|jwtverify|comparesync|check(signature|secret|token|apikey))\\s*\\(|getsecret\\s*\\(|headers\\s*\\[\\s*['\"](x-[\\w-]*(key|token|secret|sig\\w*|auth\\w*)[\\w-]*|authorization)['\"]\\s*\\]|headers\\.(authorization|x[A-Z]\\w*(Key|Token|Secret|Signature))"
+    - focus-metavariable: $H
+
+# ---------------------------------------------------------------------------------------------
+# postMessage with a wildcard target origin from Custom UI
+# Similar to the upstream opengrep-rules wildcard-postmessage-configuration rule; included so
+# this file is self-contained.
+# ---------------------------------------------------------------------------------------------
+- id: forge-bridge-postmessage-wildcard-origin
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    postMessage() is sent with target origin '*'. In a Forge Custom UI iframe any other frame
+    can receive the message, including tokens or context obtained through @forge/bridge. Pass
+    the exact product origin as the target.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/xss.mdc"
+    cwe: ["CWE-346"]
+    confidence: HIGH
+    security-severity: "7.0"
+    forge_surface: "Custom UI / @forge/bridge"
+    upstream_overlap: "opengrep-rules javascript.browser.security.wildcard-postmessage-configuration"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+  pattern-either:
+    - pattern: $W.postMessage($MSG, "*")
+    - pattern: $W.postMessage($MSG, '*')
+    - pattern: postMessage($MSG, "*")
+    - pattern: postMessage($MSG, '*')
+    - pattern: $W.postMessage($MSG, "*", ...)
+    - pattern: $W.postMessage($MSG, '*', ...)
+
+# ---------------------------------------------------------------------------------------------
+# Module-scope state receives request or tenant data inside a handler
+# Fires only when a module-scope variable is assigned, pushed or set from payload / context /
+# event / storage / product API data inside a function body. Forge reuses warm function
+# instances, so a later invocation (possibly for another tenant) can read the value.
+# ---------------------------------------------------------------------------------------------
+- id: forge-module-state-holds-request-data
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    A module-scope variable is written with request, tenant or storage data inside a handler.
+    Forge reuses warm function instances across invocations and across tenants, so this value
+    is visible to the next caller, possibly from another site. Keep per-request data inside the
+    handler, or key the cache by context.cloudId / installContext and bound its lifetime.
+  metadata:
+    skill_rule: "assets/security-rules/forge-tenant-isolation/global-state-warmstart.mdc"
+    cwe: ["CWE-668", "CWE-362"]
+    confidence: MEDIUM
+    security-severity: "7.0"
+    forge_surface: "Forge runtime (warm instance reuse)"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/frontend/**"
+      - "**/ui/**"
+      - "**/webui/**"
+      - "**/public/**"
+      - "**/scripts/**"
+      - "**/tools/**"
+      - "**/bin/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.config.js"
+      - "**/*.config.ts"
+      - "**/*.config.mjs"
+  mode: taint
+  pattern-sources:
+    - pattern: payload
+    - pattern: $R.payload
+    - pattern: context
+    - pattern: $R.context
+    - pattern: event
+    - pattern: storage.get(...)
+    - pattern: storage.getSecret(...)
+    - pattern: kvs.get(...)
+    - pattern: kvs.getSecret(...)
+    - pattern: $API.asApp().$M(...)
+    - pattern: $API.asUser().$M(...)
+    - pattern: $RESP.json()
+    - pattern: $RESP.text()
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern-inside: |
+                let $X = $INIT;
+                ...
+            - pattern-inside: |
+                var $X = $INIT;
+                ...
+            - pattern-inside: |
+                const $X = $INIT;
+                ...
+            - pattern-inside: |
+                let $X;
+                ...
+            - pattern-inside: |
+                export let $X = $INIT;
+                ...
+            - pattern-inside: |
+                export let $X;
+                ...
+        - pattern-either:
+            - pattern-inside: function $F(...) { ... }
+            - pattern-inside: async function $F(...) { ... }
+            - pattern-inside: (...) => { ... }
+            - pattern-inside: async (...) => { ... }
+            - pattern-inside: function (...) { ... }
+            - pattern-inside: async function (...) { ... }
+        - pattern-either:
+            - pattern: $X = $V
+            - pattern: $X.$P = $V
+            - pattern: $X[$K] = $V
+            - pattern: $X.$P[$K] = $V
+            - pattern: $X.set($K, $V)
+            - pattern: $X.$P.set($K, $V)
+            - pattern: $X.push($V)
+            - pattern: $X.$P.push($V)
+            - pattern: $X.add($V)
+            - pattern: Object.assign($X, $V)
+        - pattern-not: const $X = $V
+        - pattern-not: $X += $V
+        - pattern-not: $X -= $V
+        - pattern-not: $X++
+        - pattern-not: $X--
+        - pattern-not: let $X = $V
+        - pattern-not: var $X = $V
+        - pattern-not: export const $X = $V
+        - pattern-not: export let $X = $V
+        - pattern-not: $X = (...) => $B
+        - pattern-not: $X = async (...) => $B
+        - pattern-not: $X = (...) => { ... }
+        - pattern-not: $X = async (...) => { ... }
+        - pattern-not: $X = function(...) { ... }
+        - pattern-not: $X = async function(...) { ... }
+        - pattern-not-inside: function $F(...) { ... let $X = $INIT; ... }
+        - pattern-not-inside: function $F(...) { ... const $X = $INIT; ... }
+        - pattern-not-inside: function $F(...) { ... var $X = $INIT; ... }
+        - pattern-not-inside: function $F(...) { ... let $X; ... }
+        - pattern-not-inside: function $F(...) { ... var $X; ... }
+        - pattern-not-inside: (...) => { ... let $X = $INIT; ... }
+        - pattern-not-inside: (...) => { ... const $X = $INIT; ... }
+        - pattern-not-inside: (...) => { ... var $X = $INIT; ... }
+        - pattern-not-inside: (...) => { ... let $X; ... }
+        - pattern-not-inside: (...) => { ... var $X; ... }
+        - pattern-not-inside: $M(...) { ... let $X = $INIT; ... }
+        - pattern-not-inside: $M(...) { ... const $X = $INIT; ... }
+        - pattern-not-inside: $M(...) { ... let $X; ... }
+        - pattern-not-inside: $M(...) { ... var $X; ... }
+        - pattern-not-inside: |
+            for (let $X = $I; ...; ...) { ... }
+        - pattern-not-inside: |
+            for (const $X of $ITER) { ... }
+        - pattern-not-inside: |
+            for (let $X of $ITER) { ... }
+        - pattern-not-inside: |
+            for (const $X in $OBJ) { ... }
+        - focus-metavariable: $V
+
+# ---------------------------------------------------------------------------------------------
+# process.env / global mutation at runtime
+# Browser bundles, polyfills and instrumentation idioms (for example assigning global.fetch)
+# are excluded.
+# ---------------------------------------------------------------------------------------------
+- id: forge-process-env-mutation
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    process.env or a global is mutated at runtime. In Forge both are shared by every
+    invocation on a warm instance, across tenants, so values written here leak to other
+    callers and other sites. Pass the value explicitly instead of through the environment.
+  metadata:
+    skill_rule: "assets/security-rules/forge-tenant-isolation/global-state-warmstart.mdc"
+    cwe: ["CWE-668"]
+    confidence: MEDIUM
+    security-severity: "7.0"
+    forge_surface: "Forge runtime (warm instance reuse)"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/scripts/**"
+      - "**/tools/**"
+      - "**/bin/**"
+      - "**/static/**"
+      - "**/_next/**"
+      - "**/frontend/**"
+      - "**/ui/**"
+      - "**/public/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.config.js"
+      - "**/*.config.ts"
+      - "**/*.config.mjs"
+  patterns:
+    - pattern-either:
+        - pattern: process.env.$X = $Y
+        - pattern: process.env[$K] = $Y
+        - pattern: global.$X = $Y
+        - pattern: globalThis.$X = $Y
+    - pattern-not: global.fetch = $Y
+    - pattern-not: globalThis.fetch = $Y
+    - pattern-not: process.env.NODE_ENV = $Y
+    # polyfill / instrumentation idioms are not tenant data
+    - pattern-not: global.$X = require(...)
+    - pattern-not: global.$X = global.$X || $D
+    - pattern-not: global.window = $Y
+    - pattern-not: global.document = $Y
+    - pattern-not: global.navigator = $Y
+    - pattern-not: global.self = $Y
+    - pattern-not: global.$X = function(...) { ... }
+    - pattern-not: global.$X = (...) => { ... }
+    - pattern-not: globalThis.$X = globalThis.$X || $D
+
+# ---------------------------------------------------------------------------------------------
+# Storage key is exactly a user-controlled value (read or write any key)
+# The key expression is the tainted value itself, with no constant prefix, so the caller can
+# address every record of the installation.
+# ---------------------------------------------------------------------------------------------
+- id: forge-storage-key-user-controlled
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    The storage key is taken directly from request data. The caller can read, overwrite or
+    delete any record in this installation's store, including records that belong to other
+    users. Unless this resolver is reachable only by site admins, derive keys from a constant
+    prefix plus an identifier you have authorised, and bind user-specific records to
+    context.accountId.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/missing-resolver-authz.mdc"
+    cwe: ["CWE-639", "CWE-284"]
+    confidence: MEDIUM
+    security-severity: "8.5"
+    forge_surface: "@forge/api storage / @forge/kvs"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  patterns:
+    - pattern-either:
+        - pattern: storage.$M($KEY, ...)
+        - pattern: kvs.$M($KEY, ...)
+        - pattern: storage.entity($E).$M($KEY, ...)
+        - pattern: kvs.entity($E).$M($KEY, ...)
+    - metavariable-regex:
+        metavariable: $M
+        regex: "^(get|getSecret|set|setSecret|delete|deleteSecret)$"
+    - pattern-either:
+        # the key expression is itself a request field
+        - pattern: storage.$M(payload, ...)
+        - pattern: storage.$M(payload.$F, ...)
+        - pattern: storage.$M(payload.$F.$G, ...)
+        - pattern: storage.$M($R.payload, ...)
+        - pattern: storage.$M($R.payload.$F, ...)
+        - pattern: storage.$M($R.payload.$F.$G, ...)
+        - pattern: kvs.$M(payload, ...)
+        - pattern: kvs.$M(payload.$F, ...)
+        - pattern: kvs.$M(payload.$F.$G, ...)
+        - pattern: kvs.$M($R.payload, ...)
+        - pattern: kvs.$M($R.payload.$F, ...)
+        - pattern: kvs.$M($R.payload.$F.$G, ...)
+        - pattern: storage.entity($E).$M(payload, ...)
+        - pattern: storage.entity($E).$M(payload.$F, ...)
+        - pattern: storage.entity($E).$M(payload.$F.$G, ...)
+        - pattern: storage.entity($E).$M($R.payload, ...)
+        - pattern: storage.entity($E).$M($R.payload.$F, ...)
+        - pattern: storage.entity($E).$M($R.payload.$F.$G, ...)
+        - pattern: kvs.entity($E).$M(payload, ...)
+        - pattern: kvs.entity($E).$M(payload.$F, ...)
+        - pattern: kvs.entity($E).$M(payload.$F.$G, ...)
+        - pattern: kvs.entity($E).$M($R.payload, ...)
+        - pattern: kvs.entity($E).$M($R.payload.$F, ...)
+        - pattern: kvs.entity($E).$M($R.payload.$F.$G, ...)
+        # the key is a direct alias of a request field
+        - pattern-inside: |
+            const $KEY = payload.$F;
+            ...
+        - pattern-inside: |
+            const $KEY = $R.payload.$F;
+            ...
+        - pattern-inside: |
+            const { $KEY, ... } = payload;
+            ...
+        - pattern-inside: |
+            const { $KEY, ... } = $R.payload;
+            ...
+        # the key is a field of an object that is the request payload (or a payload field)
+        - patterns:
+            - pattern-either:
+                - pattern: storage.$M($D.$F, ...)
+                - pattern: kvs.$M($D.$F, ...)
+                - pattern: storage.entity($E).$M($D.$F, ...)
+                - pattern: kvs.entity($E).$M($D.$F, ...)
+            - pattern-either:
+                - pattern-inside: |
+                    const $D = $R.payload;
+                    ...
+                - pattern-inside: |
+                    const $D = payload.$G;
+                    ...
+                - pattern-inside: |
+                    const $D = $R.payload.$G;
+                    ...
+                - pattern-inside: |
+                    const $D = $R.payload as $T;
+                    ...
+                - pattern-inside: |
+                    const $D = payload.$G as $T;
+                    ...
+    - pattern-not: storage.$M(`...`, ...)
+    - pattern-not: kvs.$M(`...`, ...)
+
+# ---------------------------------------------------------------------------------------------
+# child_process in Forge function code
+# Covers require, import, dynamic import and node: specifiers. Similar to the upstream
+# detect-child-process rule; included for the Forge runtime message.
+# ---------------------------------------------------------------------------------------------
+- id: forge-sandbox-no-child-process
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    child_process is imported in Forge function code. The Forge runtime does not allow
+    spawning processes; this is dead code, a copy-paste mistake, or an attempt to break out of
+    the sandbox. Remove it.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/rce-code-execution.mdc"
+    cwe: ["CWE-78"]
+    confidence: HIGH
+    security-severity: "7.0"
+    forge_surface: "Forge runtime"
+    upstream_overlap: "opengrep-rules javascript.lang.security.detect-child-process"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/scripts/**"
+      - "**/tools/**"
+      - "**/bin/**"
+      - "**/.bitbucket/**"
+      - "**/.github/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.test.mjs"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.config.js"
+      - "**/*.config.ts"
+      - "**/*.config.mjs"
+  pattern-either:
+    - pattern: require('child_process')
+    - pattern: require('node:child_process')
+    - pattern: import 'child_process'
+    - pattern: import 'node:child_process'
+    - pattern: import $X from 'child_process'
+    - pattern: import $X from 'node:child_process'
+    - pattern: import * as $X from 'child_process'
+    - pattern: import * as $X from 'node:child_process'
+    - pattern: "import { $X } from 'child_process'"
+    - pattern: "import { $X } from 'node:child_process'"
+    - pattern: import('child_process')
+    - pattern: import('node:child_process')
+
+# ---------------------------------------------------------------------------------------------
+# eval / new Function / vm with non-literal code
+# Covers new Function with any arity. Similar to the upstream detect-eval-with-expression and
+# eval-detected rules; vendored UI libraries are excluded.
+# ---------------------------------------------------------------------------------------------
+- id: forge-sandbox-no-dynamic-code
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Dynamic code execution (eval, new Function, vm.runIn*) in Forge function code. If any part
+    of the string comes from request, storage or product data this is remote code execution
+    inside the app's identity and scopes. Replace with a parser or an allowlisted dispatch
+    table.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/rce-code-execution.mdc"
+    cwe: ["CWE-95"]
+    confidence: HIGH
+    security-severity: "8.5"
+    forge_surface: "Forge runtime"
+    upstream_overlap: "opengrep-rules javascript.lang.security.detect-eval-with-expression"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/lib/**"
+      - "**/libs/**"
+      - "**/vendor/**"
+      - "**/public/**"
+      - "**/scripts/**"
+      - "**/tools/**"
+      - "**/bin/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.config.js"
+      - "**/*.config.ts"
+      - "**/*.config.mjs"
+  pattern-either:
+    - pattern: new Function(...)
+    - patterns:
+        - pattern-either:
+            - pattern: eval($X)
+            - pattern: vm.runInNewContext($X, ...)
+            - pattern: vm.runInThisContext($X, ...)
+            - pattern: vm.runInContext($X, ...)
+        - metavariable-pattern:
+            metavariable: $X
+            patterns:
+              - pattern-not: "'...'"
+              - pattern-not: '"..."'
+
+# ---------------------------------------------------------------------------------------------
+# Resolver returns a secret to the client
+# Results of calls that merely used the secret, boolean and length checks, and masked values are
+# sanitised; process.env sources are limited to secret-like names.
+# ---------------------------------------------------------------------------------------------
+- id: forge-resolver-returns-secret
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A value from storage.getSecret() or a secret-like environment variable is returned by a
+    resolver, which delivers it to the browser. Keep secrets server-side: use them to make the
+    outbound call in the resolver and return only derived, non-secret data.
+  metadata:
+    skill_rule: "assets/security-rules/forge-secrets-storage/_index-secrets-storage.mdc"
+    cwe: ["CWE-200", "CWE-522"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "@forge/resolver"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  mode: taint
+  pattern-sources:
+    - pattern: storage.getSecret(...)
+    - pattern: kvs.getSecret(...)
+    - patterns:
+        - pattern: process.env.$X
+        - metavariable-regex:
+            metavariable: $X
+            regex: "(?i)(secret|token|password|passwd|credential|private|api_?key|client_?secret|signing)"
+  pattern-sanitizers:
+    - pattern: api.fetch(...)
+    - pattern: $A.fetch(...)
+    - pattern: fetch(...)
+    - pattern: $A.requestJira(...)
+    - pattern: $A.requestConfluence(...)
+    - pattern: $A.requestBitbucket(...)
+    - pattern: $A.requestCompass(...)
+    - pattern: $A.requestGraph(...)
+    - pattern: invokeRemote(...)
+    - pattern: Boolean(...)
+    - pattern: "!!$S"
+    - pattern: "!$S"
+    - pattern: $S.length
+    - pattern: $S == null
+    - pattern: $S != null
+    - pattern: $S === undefined
+    - pattern: $S !== undefined
+    - pattern: typeof $S
+    - pattern: $S.slice(...)
+    - pattern: $S.substring(...)
+    - pattern: $S.substr(...)
+    - pattern: $S.startsWith(...)
+    - pattern: $S.endsWith(...)
+    - pattern: $S.includes(...)
+    - pattern: $S.trim().length
+    - pattern: crypto.createHmac(...)
+    - pattern: jwt.sign(...)
+    - pattern: $H.digest(...)
+  pattern-sinks:
+    - patterns:
+        - pattern-inside: resolver.define($NAME, $HANDLER)
+        - pattern-either:
+            - pattern: return $X
+            - pattern: "return { ..., $K: $X, ... }"
+
+# ---------------------------------------------------------------------------------------------
+# Token-shaped value written to plain storage
+# The value name must end in a credential word (word boundary), so names such as tokenCount or
+# oauthState do not match.
+# ---------------------------------------------------------------------------------------------
+- id: forge-token-in-plain-storage
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A credential (token, secret, password, API key) is written with storage.set(). Plain
+    storage is not encrypted at rest for secrets and is readable by every resolver. Use
+    storage.setSecret() / kvs.setSecret() for credentials.
+  metadata:
+    skill_rule: "assets/security-rules/forge-secrets-storage/_index-secrets-storage.mdc"
+    cwe: ["CWE-312"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "@forge/api storage.set vs setSecret"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  patterns:
+    - pattern-either:
+        - pattern: storage.set($KEY, $VAL)
+        - pattern: kvs.set($KEY, $VAL)
+        - pattern: storage.entity($E).set($KEY, $VAL)
+        - pattern: kvs.entity($E).set($KEY, $VAL)
+    - metavariable-regex:
+        metavariable: $VAL
+        regex: "(?i)(^|[^a-z0-9_$])[a-z0-9_$.]*(token|secret|password|passwd|credentials?|api_?key|private_?key|client_?secret)\\b"
+
+# ---------------------------------------------------------------------------------------------
+# Custom UI: resolver result reaches an HTML sink (await form, taint)
+# textContent and innerText are safe sinks and are not reported; only HTML-interpreting sinks
+# are.
+# ---------------------------------------------------------------------------------------------
+- id: forge-bridge-invoke-to-html-sink
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Data returned by a @forge/bridge invoke() call is written to an HTML sink (innerHTML,
+    outerHTML, insertAdjacentHTML, document.write, dangerouslySetInnerHTML). Resolver output
+    often contains product data written by other users, so this is stored XSS inside the app
+    iframe, from where the attacker can call invoke() as the victim. Render as text, or
+    sanitise with DOMPurify before inserting HTML.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/xss.mdc"
+    cwe: ["CWE-79"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "@forge/bridge invoke + Custom UI DOM"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+  mode: taint
+  pattern-sources:
+    - pattern: invoke(...)
+    - pattern: $B.invoke(...)
+  pattern-sanitizers:
+    - pattern: DOMPurify.sanitize(...)
+    - pattern: $P.sanitize(...)
+    - pattern: sanitizeHtml(...)
+    - pattern: escapeHtml(...)
+    - pattern: escape(...)
+    - pattern: encodeURIComponent(...)
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: $D.innerHTML = $Y
+            - pattern: $D.outerHTML = $Y
+            - pattern: $D.insertAdjacentHTML($P, $Y)
+            - pattern: document.write($Y)
+            - pattern: document.writeln($Y)
+            - pattern: "<$EL dangerouslySetInnerHTML={{ __html: $Y }} />"
+            - pattern: "<$EL dangerouslySetInnerHTML={{ __html: $Y }}>...</$EL>"
+        - focus-metavariable: $Y
+
+# ---------------------------------------------------------------------------------------------
+# Custom UI: resolver result reaches an HTML sink (promise-callback form)
+# Same defect as forge-bridge-invoke-to-html-sink; taint does not cross .then callbacks, so the
+# callback form needs its own rule.
+# ---------------------------------------------------------------------------------------------
+- id: forge-bridge-invoke-then-html-sink
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Data returned by a @forge/bridge invoke() call is written to an HTML sink inside the
+    .then() callback. This is stored XSS inside the app iframe if the resolver returns product
+    data written by other users. Render as text, or sanitise with DOMPurify first.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/xss.mdc"
+    cwe: ["CWE-79"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "@forge/bridge invoke + Custom UI DOM"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+  pattern-either:
+    - pattern: invoke(...).then(($X) => { $D.innerHTML = <... $X ...> })
+    - pattern: invoke(...).then(($X) => { ... $D.innerHTML = <... $X ...>; ... })
+    - pattern: invoke(...).then(($X) => { $D.outerHTML = <... $X ...> })
+    - pattern: invoke(...).then(($X) => { ... $D.outerHTML = <... $X ...>; ... })
+    - pattern: invoke(...).then(($X) => { $D.insertAdjacentHTML($P, <... $X ...>) })
+    - pattern: invoke(...).then(($X) => { ... $D.insertAdjacentHTML($P, <... $X ...>); ... })
+    - pattern: invoke(...).then(($X) => { document.write(<... $X ...>) })
+    - pattern: invoke(...).then(($X) => { ... document.write(<... $X ...>); ... })
+    - pattern: invoke(...).then(function($X) { $D.innerHTML = <... $X ...> })
+    - pattern: invoke(...).then(function($X) { ... $D.innerHTML = <... $X ...>; ... })
+
+# ---------------------------------------------------------------------------------------------
+# Authorization decision on a hardcoded account identifier
+# Covers equality, negated comparisons and array membership.
+# ---------------------------------------------------------------------------------------------
+- id: forge-hardcoded-account-gate
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    An authorization decision compares the caller's accountId with a hardcoded Atlassian
+    account identifier. Anyone who learns the identifier knows exactly whose session to target,
+    the gate cannot be audited or revoked without a code change, and it breaks on every new
+    admin. Check a product permission or group membership through the product API instead.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/missing-resolver-authz.mdc"
+    cwe: ["CWE-798", "CWE-863"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "Forge resolver / UI Kit"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  patterns:
+    - pattern-either:
+        - pattern: $CTX.accountId == "$ID"
+        - pattern: $CTX.accountId === "$ID"
+        - pattern: $CTX.accountId != "$ID"
+        - pattern: $CTX.accountId !== "$ID"
+        - pattern: $CTX.accountId == '$ID'
+        - pattern: $CTX.accountId === '$ID'
+        - pattern: $CTX.accountId != '$ID'
+        - pattern: $CTX.accountId !== '$ID'
+        - pattern: '"$ID" == $CTX.accountId'
+        - pattern: '"$ID" === $CTX.accountId'
+        - pattern: "'$ID' == $CTX.accountId"
+        - pattern: "'$ID' === $CTX.accountId"
+        - pattern: '["$ID", ...].includes($CTX.accountId)'
+        - pattern: "['$ID', ...].includes($CTX.accountId)"
+    - metavariable-regex:
+        metavariable: $ID
+        regex: "^(?:[0-9a-f]{24}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]{6}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+
+# ---------------------------------------------------------------------------------------------
+# JWT verified or signed with a string-literal secret
+# A literal JWT secret is wrong in any Forge file. Similar to the upstream hardcoded-jwt-secret
+# rule; included so this file is self-contained.
+# ---------------------------------------------------------------------------------------------
+- id: forge-jwt-literal-secret
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A JWT is verified or signed with a string literal as the secret. The literal ships with
+    the app source, so anyone who reads the repository or bundle can mint valid tokens and
+    pass the web trigger's authentication. Load the secret with storage.getSecret() or a Forge
+    encrypted environment variable.
+  metadata:
+    skill_rule: "assets/security-rules/forge-secrets-storage/hardcoded-secrets.mdc"
+    cwe: ["CWE-798", "CWE-287"]
+    confidence: HIGH
+    security-severity: "8.5"
+    forge_surface: "webtrigger authentication"
+    upstream_overlap: "opengrep-rules javascript.jsonwebtoken.security.jwt-hardcode"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  pattern-either:
+    - patterns:
+        - pattern-either:
+            - pattern: $JWT.verify($TOKEN, "...", ...)
+            - pattern: $JWT.verify($TOKEN, '...', ...)
+            - pattern: $JWT.sign($CLAIMS, "...", ...)
+            - pattern: $JWT.sign($CLAIMS, '...', ...)
+        - metavariable-regex:
+            metavariable: $JWT
+            regex: "(?i)^(jwt|jsonwebtoken|jose|jws|njwt|token|jwtlib|JWT)$"
+    - pattern: jwtVerify($TOKEN, new TextEncoder().encode("..."), ...)
+    - pattern: jwtVerify($TOKEN, new TextEncoder().encode('...'), ...)
+
+# ---------------------------------------------------------------------------------------------
+# Environment variable rendered into UI
+# Covers JSX attribute and nested-expression forms; obviously non-secret variable names are
+# excluded.
+# ---------------------------------------------------------------------------------------------
+- id: forge-process-env-in-ui-render
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A process.env value is rendered into the UI tree. Forge environment variables are the
+    app's configuration and secrets; anything rendered here is readable by every user of the
+    app. Keep configuration server-side and return only the specific non-secret fields the UI
+    needs.
+  metadata:
+    skill_rule: "assets/security-rules/forge-secrets-storage/hardcoded-secrets.mdc"
+    cwe: ["CWE-200"]
+    confidence: MEDIUM
+    security-severity: "6.5"
+    forge_surface: "@forge/react / UI Kit + process.env"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+  patterns:
+    - pattern-either:
+        - pattern: <$EL $A={process.env.$X} ...>...</$EL>
+        - pattern: <$EL $A={process.env.$X} ... />
+        - pattern: <$EL ...>{process.env.$X}</$EL>
+        - pattern: <$EL ...>{<... process.env.$X ...>}</$EL>
+        - pattern: <$EL $A={<... process.env.$X ...>} ...>...</$EL>
+        - pattern: <$EL $A={<... process.env.$X ...>} ... />
+    - metavariable-regex:
+        metavariable: $X
+        regex: "^(?!NODE_ENV$)(?!.*(VERSION|STAGE|ENVIRONMENT|ENV_NAME|LOG_LEVEL|DEBUG|APP_NAME|APP_ID|PUBLIC_|BASE_URL|SITE_URL|REGION|LOCALE)).*$"
+
+# ---------------------------------------------------------------------------------------------
+# Atlassian API token used for Basic authentication
+# The Basic header must be sent to an Atlassian or Bitbucket host or product REST path, be built
+# from an email:token pair, or come from a hardcoded API token constant. Basic auth to
+# third-party APIs does not fire.
+# ---------------------------------------------------------------------------------------------
+- id: forge-atlassian-api-token-basic-auth
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    An Atlassian product API is called with Basic authentication built from an account API
+    token. The token is a long-lived personal credential that grants everything its owner can
+    do and bypasses the app's declared scopes. Use api.asUser() / api.asApp() with manifest
+    scopes instead of collecting or embedding API tokens.
+  metadata:
+    skill_rule: "assets/security-rules/forge-secrets-storage/hardcoded-secrets.mdc"
+    cwe: ["CWE-522", "CWE-798"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "Atlassian product REST APIs"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  pattern-either:
+    # Basic header inside a request whose text names an Atlassian host or product REST path
+    - patterns:
+        - pattern-either:
+            - pattern: "$FN($URL, { ..., headers: { ..., Authorization: `Basic ${$AUTH}`, ... }, ... })"
+            - pattern: "$FN($URL, { ..., headers: { ..., 'Authorization': `Basic ${$AUTH}`, ... }, ... })"
+            - pattern: "$FN($URL, { ..., headers: { ..., \"Authorization\": `Basic ${$AUTH}`, ... }, ... })"
+            - pattern: "$O.$FN($URL, { ..., headers: { ..., Authorization: `Basic ${$AUTH}`, ... }, ... })"
+            - pattern: "$O.$FN($URL, { ..., headers: { ..., 'Authorization': `Basic ${$AUTH}`, ... }, ... })"
+            - pattern: "$O.$FN($URL, { ..., headers: { ..., Authorization: 'Basic ' + $AUTH, ... }, ... })"
+        - pattern-regex: "(?i)(atlassian\\.net|api\\.atlassian\\.com|atlassian-dev\\.net|bitbucket\\.org|/rest/api/|/wiki/rest/|/rest/servicedeskapi/|/gateway/api/|/2\\.0/repositories)"
+    # the canonical email:token construction
+    - patterns:
+        - pattern-either:
+            - pattern: "Buffer.from(`${$EMAIL}:${$TOKEN}`, ...)"
+            - pattern: "Buffer.from(`${$EMAIL}:${$TOKEN}`)"
+            - pattern: "Buffer.from($EMAIL + ':' + $TOKEN, ...)"
+            - pattern: "Buffer.from($EMAIL + \":\" + $TOKEN, ...)"
+            - pattern: "btoa(`${$EMAIL}:${$TOKEN}`)"
+        - metavariable-regex:
+            metavariable: $TOKEN
+            regex: "(?i)(api.?token|atlassian.?token|personal.?token|pat\\b)"
+    # hardcoded api token constant
+    - patterns:
+        - pattern-either:
+            - pattern: const $TOKEN = "..."
+            - pattern: let $TOKEN = "..."
+            - pattern: const $TOKEN = '...'
+            - pattern: let $TOKEN = '...'
+        - metavariable-regex:
+            metavariable: $TOKEN
+            regex: "(?i)^(atlassian|jira|confluence|bitbucket)?_?api_?token$|^atlassian_?token$"
+
+# ---------------------------------------------------------------------------------------------
+# assumeTrustedRoute() with a user-controlled path (taint)
+# Only user-controlled dynamic paths fire; constants and configuration-driven paths do not.
+# ---------------------------------------------------------------------------------------------
+- id: forge-assume-trusted-route-dynamic-path
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    User-controlled data reaches assumeTrustedRoute(). This API disables the encoding and
+    validation that the route tag performs, so path segments, query parameters and JQL/CQL can
+    be injected into the product request. Use the route tag with the value as an interpolated
+    segment, or validate the value against a strict allowlist first.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/ssrf.mdc"
+    cwe: ["CWE-22", "CWE-20"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "@forge/api assumeTrustedRoute"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: payload
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+    - patterns:
+        - pattern: $REQ.payload
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: $P
+    - patterns:
+        - pattern-either:
+            - pattern: $EVENT.body
+            - pattern: $EVENT.queryParameters
+            - pattern: $EVENT.headers
+            - pattern: $EVENT.path
+        - metavariable-regex:
+            metavariable: $EVENT
+            regex: "^(event|evt|e|req|request|webtriggerEvent)$"
+  pattern-sanitizers:
+    - pattern: encodeURIComponent(...)
+    - patterns:
+        - pattern: $V
+        - metavariable-regex:
+            metavariable: $V
+            regex: "(?i)(^|\\.)(maxResults|startAt|limit|offset|pageSize|cursor|page)$"
+  pattern-sinks:
+    - patterns:
+        - pattern: assumeTrustedRoute($PATH)
+        - focus-metavariable: $PATH
+
+# ---------------------------------------------------------------------------------------------
+# Request data reaching raw SQL text (taint)
+# Sinks are the query arguments of executeRaw, queryRaw, prepareRaw, prepare and executeDDL.
+# Number(), parseInt, .length, schema parse and the client's escaping helpers are sanitisers.
+# ---------------------------------------------------------------------------------------------
+- id: forge-dynamic-raw-sql-query
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A Forge SQL raw query is built with string interpolation or concatenation. Any user or
+    product value in the string is SQL injection against the app's database. Use
+    sql.prepare('... ?').bindParams(...) and pass values as parameters; never interpolate
+    identifiers or values into the SQL text.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/sql-injection.mdc"
+    cwe: ["CWE-89"]
+    confidence: HIGH
+    security-severity: "8.5"
+    forge_surface: "@forge/sql"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/migrations/**"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: payload
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+    - patterns:
+        - pattern: $REQ.payload
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: $P
+    - patterns:
+        - pattern-either:
+            - pattern: $EVENT.body
+            - pattern: $EVENT.queryParameters
+            - pattern: $EVENT.headers
+        - metavariable-regex:
+            metavariable: $EVENT
+            regex: "^(event|evt|e|req|request|webtriggerEvent)$"
+  pattern-sanitizers:
+    - pattern: Number(...)
+    - pattern: parseInt(...)
+    - pattern: parseFloat(...)
+    - pattern: $X.length
+    - pattern: $S.parse(...)
+    - pattern: escapeId(...)
+    - pattern: $DB.escape(...)
+    - pattern: $DB.escapeId(...)
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: "$DB.executeRaw($Q, ...)"
+            - pattern: "$DB.queryRaw($Q, ...)"
+            - pattern: "$DB.prepareRaw($Q, ...)"
+            - pattern: "$DB.prepare($Q, ...)"
+            - pattern: "$DB.executeDDL($Q, ...)"
+        - focus-metavariable: $Q
+
+# ---------------------------------------------------------------------------------------------
+# Web trigger returns an HTML body with interpolated data
+# A web trigger that answers with text/html and interpolates data is reflected or stored XSS on
+# the web trigger origin.
+# ---------------------------------------------------------------------------------------------
+- id: forge-webtrigger-html-response-interpolation
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A web trigger response declares an HTML content type and its body interpolates data into
+    HTML. Request parameters or stored values rendered this way are reflected or stored XSS on
+    the web trigger origin. Return JSON, or HTML-encode every interpolated value for its
+    context (text, attribute, URL) before building the body.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/xss.mdc"
+    cwe: ["CWE-79"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "webtrigger HTML response"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  patterns:
+    - pattern-either:
+        - pattern: "{ ..., headers: { ..., 'Content-Type': ['text/html', ...], ... }, ..., body: `...${$X}...`, ... }"
+        - pattern: "{ ..., body: `...${$X}...`, ..., headers: { ..., 'Content-Type': ['text/html', ...], ... }, ... }"
+        - pattern: "{ ..., headers: { ..., \"Content-Type\": [\"text/html\", ...], ... }, ..., body: `...${$X}...`, ... }"
+        - pattern: "{ ..., body: `...${$X}...`, ..., headers: { ..., \"Content-Type\": [\"text/html\", ...], ... }, ... }"
+        - pattern: "{ ..., headers: { ..., 'Content-Type': ['text/html; charset=utf-8', ...], ... }, ..., body: `...${$X}...`, ... }"
+        - pattern: "{ ..., body: `...${$X}...`, ..., headers: { ..., 'Content-Type': ['text/html; charset=utf-8', ...], ... }, ... }"
+        - pattern: "{ ..., headers: { ..., \"Content-Type\": [\"text/html; charset=utf-8\", ...], ... }, ..., body: `...${$X}...`, ... }"
+        - pattern: "{ ..., body: `...${$X}...`, ..., headers: { ..., \"Content-Type\": [\"text/html; charset=utf-8\", ...], ... }, ... }"
+        - pattern: "{ ..., headers: { ..., 'content-type': ['text/html', ...], ... }, ..., body: `...${$X}...`, ... }"
+        - pattern: "{ ..., body: `...${$X}...`, ..., headers: { ..., 'content-type': ['text/html', ...], ... }, ... }"
+        - pattern: "{ ..., headers: { ..., 'content-type': ['text/html; charset=utf-8', ...], ... }, ..., body: `...${$X}...`, ... }"
+        - pattern: "{ ..., body: `...${$X}...`, ..., headers: { ..., 'content-type': ['text/html; charset=utf-8', ...], ... }, ... }"
+        - patterns:
+            - pattern-either:
+                - pattern-inside: |
+                    const $HTML = `...${$X}...`;
+                    ...
+                - pattern-inside: |
+                    let $HTML = `...${$X}...`;
+                    ...
+                - pattern-inside: |
+                    $HTML = `...${$X}...`;
+                    ...
+                - pattern-inside: |
+                    const $HTML = $A + `...${$X}...`;
+                    ...
+            - pattern-either:
+              - pattern: "{ ..., headers: { ..., 'Content-Type': ['text/html', ...], ... }, ..., body: $HTML, ... }"
+              - pattern: "{ ..., body: $HTML, ..., headers: { ..., 'Content-Type': ['text/html', ...], ... }, ... }"
+              - pattern: "{ ..., headers: { ..., \"Content-Type\": [\"text/html\", ...], ... }, ..., body: $HTML, ... }"
+              - pattern: "{ ..., body: $HTML, ..., headers: { ..., \"Content-Type\": [\"text/html\", ...], ... }, ... }"
+              - pattern: "{ ..., headers: { ..., 'Content-Type': ['text/html; charset=utf-8', ...], ... }, ..., body: $HTML, ... }"
+              - pattern: "{ ..., body: $HTML, ..., headers: { ..., 'Content-Type': ['text/html; charset=utf-8', ...], ... }, ... }"
+              - pattern: "{ ..., headers: { ..., \"Content-Type\": [\"text/html; charset=utf-8\", ...], ... }, ..., body: $HTML, ... }"
+              - pattern: "{ ..., body: $HTML, ..., headers: { ..., \"Content-Type\": [\"text/html; charset=utf-8\", ...], ... }, ... }"
+              - pattern: "{ ..., headers: { ..., 'content-type': ['text/html', ...], ... }, ..., body: $HTML, ... }"
+              - pattern: "{ ..., body: $HTML, ..., headers: { ..., 'content-type': ['text/html', ...], ... }, ... }"
+              - pattern: "{ ..., headers: { ..., 'content-type': ['text/html; charset=utf-8', ...], ... }, ..., body: $HTML, ... }"
+              - pattern: "{ ..., body: $HTML, ..., headers: { ..., 'content-type': ['text/html; charset=utf-8', ...], ... }, ... }"
+    - metavariable-pattern:
+        metavariable: $X
+        patterns:
+          - pattern-not: escapeHtml(...)
+          - pattern-not: escape(...)
+          - pattern-not: esc(...)
+          - pattern-not: encode(...)
+          - pattern-not: encodeHtml(...)
+          - pattern-not: htmlEncode(...)
+          - pattern-not: sanitize(...)
+          - pattern-not: DOMPurify.sanitize(...)
+          - pattern-not: $H.encode(...)
+          - pattern-not: $H.escape(...)
+          - pattern-not: $H.sanitize(...)
+    - metavariable-regex:
+        metavariable: $X
+        regex: "^(?!.*(?i:safe|escap|encod|sanitiz|purif)).*$"
+
+# ---------------------------------------------------------------------------------------------
+# invokeRemote() path carries user-controlled data (taint)
+# Sinks cover the string, options and (remote, options) call forms.
+# ---------------------------------------------------------------------------------------------
+- id: forge-invoke-remote-dynamic-path
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    User-controlled data reaches the path of invokeRemote(). The remote host is fixed by the
+    manifest, but the caller can select any endpoint on the app's own backend with the app's
+    Forge Invocation Token attached. Map user input to a fixed set of paths and pass values as
+    validated parameters.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/ssrf.mdc"
+    cwe: ["CWE-918", "CWE-20"]
+    confidence: MEDIUM
+    security-severity: "7.0"
+    forge_surface: "@forge/api invokeRemote"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: payload
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+    - patterns:
+        - pattern: $REQ.payload
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: $P
+  pattern-sanitizers:
+    - pattern: encodeURIComponent(...)
+    - patterns:
+        - pattern: $TABLE[$K]
+        - metavariable-regex:
+            metavariable: $TABLE
+            regex: "^[A-Z][A-Z0-9_]*$"
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: invokeRemote($PATH, ...)
+            - pattern: "invokeRemote({ ..., path: $PATH, ... })"
+            - pattern: "invokeRemote($REMOTE, { ..., path: $PATH, ... })"
+            - pattern: $API.invokeRemote($PATH, ...)
+            - pattern: "$API.invokeRemote({ ..., path: $PATH, ... })"
+            - pattern: "$API.invokeRemote($REMOTE, { ..., path: $PATH, ... })"
+        - focus-metavariable: $PATH
+
+# ---------------------------------------------------------------------------------------------
+# Storage key built from request data with a constant prefix
+# Keys bound to the caller (context.accountId) or the site (context.cloudId / installContext)
+# are excluded. The reviewer confirms the caller is authorised for the referenced object
+# (issue, page, project).
+# ---------------------------------------------------------------------------------------------
+- id: forge-storage-tainted-key
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    A storage key is built from request data (for example an issue or page id supplied by the
+    client). Any caller can read or write the record for any identifier they can guess, so
+    confirm the caller is authorised for that object (asUser() request, or a permission check)
+    before the storage call, or bind the key to context.accountId.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/missing-resolver-authz.mdc"
+    cwe: ["CWE-639"]
+    confidence: MEDIUM
+    security-severity: "6.0"
+    forge_surface: "@forge/api storage / @forge/kvs"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: payload
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+    - patterns:
+        - pattern: $REQ.payload
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: $P
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: storage.get($KEY)
+            - pattern: storage.getSecret($KEY)
+            - pattern: storage.set($KEY, ...)
+            - pattern: storage.setSecret($KEY, ...)
+            - pattern: storage.delete($KEY)
+            - pattern: storage.deleteSecret($KEY)
+            - pattern: storage.entity($E).get($KEY)
+            - pattern: storage.entity($E).set($KEY, ...)
+            - pattern: storage.entity($E).delete($KEY)
+            - pattern: kvs.get($KEY)
+            - pattern: kvs.getSecret($KEY)
+            - pattern: kvs.set($KEY, ...)
+            - pattern: kvs.setSecret($KEY, ...)
+            - pattern: kvs.delete($KEY)
+            - pattern: kvs.deleteSecret($KEY)
+            - pattern: kvs.entity($E).get($KEY)
+            - pattern: kvs.entity($E).set($KEY, ...)
+            - pattern: kvs.entity($E).delete($KEY)
+        - metavariable-pattern:
+            metavariable: $KEY
+            patterns:
+              - pattern-not: payload
+              - pattern-not: payload.$F
+              - pattern-not: payload.$F.$G
+              - pattern-not: $R.payload
+              - pattern-not: $R.payload.$F
+              - pattern-not: $R.payload.$F.$G
+              - pattern-not: "`...${$CTX.accountId}...`"
+              - pattern-not: "`...${$CTX.cloudId}...`"
+              - pattern-not: "`...${$CTX.installationId}...`"
+              - pattern-not: "`...${$CTX.installContext}...`"
+              - pattern-not: "`...${$CTX.localId}...`"
+              - pattern-not: "`...${$CTX.context.accountId}...`"
+              - pattern-not: "`...${$CTX.context.cloudId}...`"
+              - pattern-not: $F(<... $CTX.accountId ...>, ...)
+              - pattern-not: $F(..., <... $CTX.accountId ...>)
+        - pattern-not-inside: |
+            const $KEY = payload.$F;
+            ...
+        - pattern-not-inside: |
+            const $KEY = $R.payload.$F;
+            ...
+        - pattern-not-inside: |
+            const { $KEY, ... } = payload;
+            ...
+        - focus-metavariable: $KEY
+
+# ---------------------------------------------------------------------------------------------
+# JQL / CQL string built from request data (taint)
+# Fires when request data reaches a variable that holds JQL or CQL text. The asApp() variant is
+# reported as ERROR by forge-asapp-user-input-in-path.
+# ---------------------------------------------------------------------------------------------
+- id: forge-jql-cql-injection
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    A JQL or CQL query is built from a dynamic value. If the value comes from the client this
+    is query injection; through asUser() it lets the caller run arbitrary searches in their own
+    name, through asApp() it reads data the caller is not allowed to see. Quote and escape
+    values (or validate against a strict pattern) and prefer fixed query templates.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/_index-injection.mdc"
+    cwe: ["CWE-943"]
+    confidence: MEDIUM
+    security-severity: "6.0"
+    forge_surface: "Jira / Confluence search APIs"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: payload
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+    - patterns:
+        - pattern: $REQ.payload
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: $P
+    - patterns:
+        - pattern-either:
+            - pattern: $EVENT.body
+            - pattern: $EVENT.queryParameters
+            - pattern: $EVENT.headers
+        - metavariable-regex:
+            metavariable: $EVENT
+            regex: "^(event|evt|e|req|request|webtriggerEvent)$"
+  pattern-sanitizers:
+    - pattern: JSON.stringify(...)
+    - patterns:
+        - pattern: $V
+        - metavariable-regex:
+            metavariable: $V
+            regex: "(?i)(^|\\.)(maxResults|startAt|start|limit|offset|pageSize|cursor|orderBy|fields|expand)$"
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: "$JQL = $V"
+            - pattern: "const $JQL = $V"
+            - pattern: "let $JQL = $V"
+            - pattern: "$JQL += $V"
+        - metavariable-regex:
+            metavariable: $JQL
+            regex: "(?i)(^|[^a-z])(jql|cql)([^a-z]|$)|(?i)(jql|cql)(query|string|str|fragment|text|expr|clause)?$"
+        - focus-metavariable: $V
+
+# ---------------------------------------------------------------------------------------------
+# Filesystem APIs in Forge function code
+# Covers fs, node:fs and fs/promises forms.
+# ---------------------------------------------------------------------------------------------
+- id: forge-sandbox-no-filesystem
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    Node filesystem APIs are used in Forge function code. Forge functions have no persistent
+    writable filesystem; this is dead code or a misunderstanding of the runtime. Use Forge
+    storage or an external service, and remove the fs usage.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/rce-code-execution.mdc"
+    cwe: ["CWE-1104"]
+    confidence: MEDIUM
+    security-severity: "3.0"
+    forge_surface: "Forge runtime"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/scripts/**"
+      - "**/tools/**"
+      - "**/bin/**"
+      - "**/.bitbucket/**"
+      - "**/.github/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.test.mjs"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+      - "**/*.config.js"
+      - "**/*.config.ts"
+      - "**/*.config.mjs"
+      - "**/generate-*.js"
+  pattern-either:
+    - pattern: require('fs')
+    - pattern: require('node:fs')
+    - pattern: require('fs/promises')
+    - pattern: require('node:fs/promises')
+    - pattern: import $X from 'fs'
+    - pattern: import $X from 'node:fs'
+    - pattern: import * as $X from 'fs'
+    - pattern: import * as $X from 'node:fs'
+    - pattern: import $X from 'fs/promises'
+    - pattern: import * as $X from 'fs/promises'
+    - pattern: "import { $X } from 'fs'"
+    - pattern: "import { $X } from 'node:fs'"
+    - pattern: "import { $X } from 'fs/promises'"
+
+# ---------------------------------------------------------------------------------------------
+# Console logging of whole request objects or credentials
+# Only whole-object dumps of request/event/context/payload/headers (bare identifier or
+# JSON.stringify of it) and credential-named values fire; logging individual fields such as
+# response.status does not.
+# ---------------------------------------------------------------------------------------------
+- id: forge-sensitive-data-console-logging
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    A console call writes a whole request, event, context, payload or headers object, or a
+    credential-named value. Forge logs are retained and visible to the app developer, so this
+    exposes end-user data or secrets outside the product. Log only the identifiers needed for
+    operations and never log tokens or raw payloads.
+  metadata:
+    skill_rule: "assets/security-rules/forge-auditing/_index-auditing.mdc"
+    cwe: ["CWE-532"]
+    confidence: MEDIUM
+    security-severity: "5.0"
+    forge_surface: "Forge runtime logging"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/frontend/**"
+      - "**/ui/**"
+      - "**/webui/**"
+      - "**/public/**"
+      - "**/chrome-extension/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+      - "**/*.spec.js"
+      - "**/*.spec.ts"
+  patterns:
+    - pattern-either:
+        - patterns:
+            - pattern-either:
+                - pattern: console.$METHOD(..., $OBJ, ...)
+                - pattern: console.$METHOD(..., JSON.stringify($OBJ, ...), ...)
+                - pattern: "console.$METHOD(..., { ..., $K: $OBJ, ... }, ...)"
+            - metavariable-regex:
+                metavariable: $OBJ
+                regex: "^(req|request|event|evt|context|payload|headers|body|credentials)$|^(req|request|event|evt)\\.(payload|context|body|headers)$|^(context|payload)\\.(context|payload)$"
+        - patterns:
+            - pattern-either:
+                - pattern: console.$METHOD(..., $VAL, ...)
+                - pattern: "console.$METHOD(..., { ..., $K: $VAL, ... }, ...)"
+                - pattern: console.$METHOD(`...${$VAL}...`, ...)
+            - metavariable-regex:
+                metavariable: $VAL
+                regex: "(?i)^[a-z0-9_$.]*(token|secret|password|passwd|credential|api_?key|private_?key|authorization)[a-z0-9_$]*$"
+            - metavariable-pattern:
+                metavariable: $VAL
+                patterns:
+                  - pattern-not: $A.status
+                  - pattern-not: $A.length
+                  - pattern-not: $A.ok
+    - metavariable-regex:
+        metavariable: $METHOD
+        regex: "^(log|info|debug|warn|error|trace)$"
+
+# ---------------------------------------------------------------------------------------------
+# Manifest module grants anonymous access
+# One finding per module with access: anonymous or unlicensedAccess; the reviewer checks what
+# that module's resolvers read and write.
+# ---------------------------------------------------------------------------------------------
+- id: forge-manifest-anonymous-access-module
+  languages: [generic]
+  severity: WARNING
+  message: >
+    This module is reachable by anonymous (unauthenticated) users. Every resolver function it
+    can invoke runs for callers with no accountId. Confirm those resolvers perform no writes,
+    no asApp() reads of restricted data, and nothing billable, or remove anonymous access.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/missing-resolver-authz.mdc"
+    cwe: ["CWE-306"]
+    confidence: HIGH
+    security-severity: "6.0"
+    forge_surface: "manifest.yml access: anonymous"
+  paths:
+    include:
+      - "**/manifest.yml"
+      - "**/manifest.yaml"
+  pattern-either:
+    - pattern-regex: "(?m)^\\s*access:\\s*['\"]?anonymous"
+    - pattern-regex: "(?m)^\\s*access:\\s*\\[[^\\]]*anonymous"
+    - pattern-regex: "(?ms)^\\s*access:\\s*\\n\\s*-\\s*['\"]?anonymous"
+    - pattern-regex: "\"access\"\\s*:\\s*(\"anonymous\"|\\[[^\\]]*\"anonymous\")"
+
+# ---------------------------------------------------------------------------------------------
+# HTML template with interpolated data (generic, non-webtrigger)
+# Templates that interpolate data are flagged unless the interpolation passes through an
+# escaping helper. dangerouslySetInnerHTML is left to the invoke taint rules and to the
+# upstream react-dangerouslysetinnerhtml rule.
+# ---------------------------------------------------------------------------------------------
+- id: forge-unsafe-html-rendering
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    An HTML string is built with interpolated data. If any value comes from users or product
+    content this is XSS wherever the string is rendered (Custom UI, web trigger response,
+    Confluence storage format). HTML-encode each value for its context or use a templating
+    layer that escapes by default.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/xss.mdc"
+    cwe: ["CWE-79"]
+    confidence: MEDIUM
+    security-severity: "5.5"
+    forge_surface: "generated HTML"
+    upstream_overlap: "opengrep-rules typescript.react.security.audit.react-dangerouslysetinnerhtml (for the JSX form)"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+  pattern-either:
+    - patterns:
+        - pattern: "<$EL dangerouslySetInnerHTML={{ __html: $DATA }} />"
+        - pattern-not: "<$EL dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(...) }} />"
+        - pattern-not: "<$EL dangerouslySetInnerHTML={{ __html: $P.sanitize(...) }} />"
+        - pattern-not: "<$EL dangerouslySetInnerHTML={{ __html: sanitizeHtml(...) }} />"
+        - pattern-not: "<$EL dangerouslySetInnerHTML={{ __html: '...' }} />"
+    - pattern-regex: "(?s)(?:\\breturn|(?:const|let|var)\\s+[A-Za-z_$][\\w$]*\\s*=|\\bbody\\s*:)\\s*`[^`]*<(?:a|p|div|span|footer|li|td|th|tr|table|body|html|h[1-6]|img|script|iframe)\\b[^`]*\\$\\{(?!\\s*(?:escapeHtml|escape|esc|encode|encodeHtml|sanitize|DOMPurify\\.sanitize|he\\.encode|htmlEncode)\\s*\\()(?![^}]*(?i:safe|escap|encod|sanitiz|purif))[^}]+\\}[^`]*`"
+
+# ---------------------------------------------------------------------------------------------
+# Context identifier with a payload fallback (authorization target chosen by the client)
+# Shape: context.extension.repository.uuid ?? payload.uuid. When the context field is absent,
+# or the resolver is invoked directly, the caller chooses the object the handler acts on.
+# ---------------------------------------------------------------------------------------------
+- id: forge-context-identifier-payload-fallback
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A platform-provided identifier from the invocation context falls back to a value supplied by
+    the client. When the context field is absent (or the caller invokes the resolver directly) the
+    caller chooses the object the handler acts on, which bypasses the module placement the app
+    relies on for authorization. Use the context value only, and fail closed when it is missing.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/prefer-context-authz.mdc"
+    cwe: ["CWE-639", "CWE-807"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "@forge/resolver context vs payload"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  patterns:
+    - pattern-either:
+        - pattern: "$CTX.extension?.$A ?? payload.$F"
+        - pattern: "$CTX.extension?.$A?.$B ?? payload.$F"
+        - pattern: "$CTX.extension?.$A?.$B?.$C ?? payload.$F"
+        - pattern: "$CTX.extension?.$A || payload.$F"
+        - pattern: "$CTX.extension?.$A?.$B || payload.$F"
+        - pattern: "$CTX.extension.$A?.$B ?? payload.$F"
+        - pattern: "$R.context.extension?.$A?.$B ?? $R.payload.$F"
+        - pattern: "$R.context?.extension?.$A?.$B ?? $R.payload.$F"
+        - pattern: "$CTX.extension.$A ?? payload.$F"
+        - pattern: "$CTX.extension.$A.$B ?? payload.$F"
+        - pattern: "$CTX.extension.$A.$B.$C ?? payload.$F"
+        - pattern: "$CTX.extension.$A || payload.$F"
+        - pattern: "$CTX.extension.$A.$B || payload.$F"
+        - pattern: "$CTX.extension.$A.$B.$C || payload.$F"
+        - pattern: "payload.$F ?? $CTX.extension.$A"
+        - pattern: "payload.$F ?? $CTX.extension.$A.$B"
+        - pattern: "payload.$F || $CTX.extension.$A"
+        - pattern: "payload.$F || $CTX.extension.$A.$B"
+        - pattern: "$CTX.accountId ?? payload.$F"
+        - pattern: "$CTX.accountId || payload.$F"
+        - pattern: "$CTX.cloudId ?? payload.$F"
+        - pattern: "$CTX.cloudId || payload.$F"
+        - pattern: "$CTX.extension.$A ? $CTX.extension.$A : payload.$F"
+        - pattern: "$CTX.extension.$A.$B ? $CTX.extension.$A.$B : payload.$F"
+        - pattern: "$R.context.extension.$A ?? $R.payload.$F"
+        - pattern: "$R.context.extension.$A.$B ?? $R.payload.$F"
+        - pattern: "$R.context.extension.$A || $R.payload.$F"
+        - pattern: "$R.context.extension.$A.$B || $R.payload.$F"
+        - pattern: "$R.context.accountId ?? $R.payload.$F"
+        - pattern: "$R.context.accountId || $R.payload.$F"
+    - metavariable-regex:
+        metavariable: $CTX
+        regex: "^(context|ctx|.*\\.context)$"
+
+# ---------------------------------------------------------------------------------------------
+# Client-supplied identity or role field used in an authorization decision
+# Shapes: if (payload.isAdmin), if (payload.role === 'admin').
+# ---------------------------------------------------------------------------------------------
+- id: forge-payload-identity-trusted
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    An authorization decision branches on an identity or role field that the client sends in the
+    resolver payload. Anyone can invoke the resolver with that field set. Derive identity from
+    context.accountId and check roles through the product API (groups, permissions) on the server.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/prefer-context-authz.mdc"
+    cwe: ["CWE-807", "CWE-863"]
+    confidence: MEDIUM
+    security-severity: "7.0"
+    forge_surface: "@forge/resolver payload"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  patterns:
+    - pattern-either:
+        - pattern-inside: "resolver.define($N, $H)"
+        - pattern-inside: "export const $H = async ({ payload, ... }) => { ... }"
+        - pattern-inside: "export async function $H({ payload, ... }) { ... }"
+        - pattern-inside: "export const $H = async ($R) => { ... }"
+        - pattern-inside: "export async function $H($R) { ... }"
+    - pattern-not-inside: "$JWT.verify(...)"
+    - pattern-not-inside: |
+        const payload = $JWT.verify(...);
+        ...
+    - pattern-not-inside: |
+        const payload = jwtVerify(...);
+        ...
+    - pattern-not-inside: |
+        const { payload } = await jwtVerify(...);
+        ...
+    - pattern-either:
+        - pattern: "if (<... payload.$F ...>) { ... }"
+        - pattern: "if (<... $R.payload.$F ...>) { ... }"
+        - pattern: "<... payload.$F ...> ? $A : $B"
+        - pattern: "<... $R.payload.$F ...> ? $A : $B"
+    - metavariable-regex:
+        metavariable: $F
+        regex: "(?i)^(isAdmin|isSiteAdmin|isProjectAdmin|admin|isOwner|owner|role|roles|userRole|permissions?|hasPermission|canEdit|canDelete|isAuthorized|authorized|accountId|userId|currentUser|cloudId|siteId)$"
+
+# ---------------------------------------------------------------------------------------------
+# JQL / CQL sent in a request body through asApp()
+# The URL-focused asApp rule cannot see POST bodies; the current Jira search API takes JQL in a
+# JSON body (/rest/api/3/search/jql).
+# ---------------------------------------------------------------------------------------------
+- id: forge-asapp-query-in-request-body
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Request data reaches the body of an asApp() search request (JQL, CQL or a search payload).
+    asApp() searches run with the app's scopes, so a caller-controlled query returns issues or
+    pages the caller cannot see. Use asUser() for caller-driven searches, or build the query from
+    validated constants and pass user values only as quoted, allow-listed terms.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/asapp-privilege-escalation.mdc"
+    cwe: ["CWE-943", "CWE-639"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "@forge/api asApp() search body"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: "payload"
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+    - patterns:
+        - pattern: "$REQ.payload"
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: "$P"
+  pattern-sanitizers:
+    - patterns:
+        - pattern: "$V"
+        - metavariable-regex:
+            metavariable: $V
+            regex: "(?i)(^|\\.)(maxResults|startAt|limit|offset|pageSize|cursor|nextPageToken|fields|expand)$"
+  pattern-sinks:
+    - patterns:
+        - pattern: "$API.asApp().$M($URL, { ..., body: JSON.stringify({ ..., jql: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "asApp().$M($URL, { ..., body: JSON.stringify({ ..., jql: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "$API.asApp().$M($URL, { ..., body: JSON.stringify({ ..., cql: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "asApp().$M($URL, { ..., body: JSON.stringify({ ..., cql: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "$API.asApp().$M($URL, { ..., body: JSON.stringify({ ..., query: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "asApp().$M($URL, { ..., body: JSON.stringify({ ..., query: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "$API.asApp().$M($URL, { ..., body: JSON.stringify({ ..., expression: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "asApp().$M($URL, { ..., body: JSON.stringify({ ..., expression: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "$API.asApp().$M($URL, { ..., body: JSON.stringify({ ..., searchString: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+    - patterns:
+        - pattern: "asApp().$M($URL, { ..., body: JSON.stringify({ ..., searchString: $X, ... }), ... })"
+        - metavariable-regex:
+            metavariable: $M
+            regex: "^(requestJira|requestConfluence|requestBitbucket)$"
+        - focus-metavariable: $X
+
+# ---------------------------------------------------------------------------------------------
+# Resolver payload merged into an object (prototype pollution)
+# Deep merge or key-by-key copy of the payload (or a field of it) into another object.
+# ---------------------------------------------------------------------------------------------
+- id: forge-payload-merge-prototype-pollution
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    A client-supplied object is deep-merged or key-copied into an existing object. A payload with
+    __proto__ or constructor.prototype keys pollutes Object.prototype for the whole warm instance,
+    which can flip authorization flags and corrupt every later invocation on that instance. Copy
+    only an allow-list of fields (pick) or validate with a schema that rejects unknown keys.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/prototype-pollution.mdc"
+    cwe: ["CWE-1321"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "@forge/resolver payload into object merge"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  mode: taint
+  pattern-sources:
+    - patterns:
+        - pattern: "payload"
+        - pattern-not-inside: |
+            const payload = $V;
+            ...
+    - patterns:
+        - pattern: "$REQ.payload"
+        - metavariable-regex:
+            metavariable: $REQ
+            regex: "^(req|request|args|input)$"
+    - patterns:
+        - pattern-either:
+            - pattern-inside: "resolver.define($N, ({ payload: $P, ... }) => { ... })"
+            - pattern-inside: "resolver.define($N, async ({ payload: $P, ... }) => { ... })"
+        - pattern: "$P"
+    - patterns:
+        - pattern-either:
+            - pattern: "JSON.parse($EVENT.body)"
+            - pattern: "$EVENT.body"
+        - metavariable-regex:
+            metavariable: $EVENT
+            regex: "^(event|evt|e|req|request|webtriggerEvent)$"
+  pattern-sanitizers:
+    - pattern: "$S.parse(...)"
+    - pattern: "$S.safeParse(...)"
+    - pattern: "pick(...)"
+    - pattern: "$L.pick(...)"
+    - pattern: "$L.omit(..., [\"__proto__\", ...])"
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: "_.merge($T, $P, ...)"
+            - pattern: "merge($T, $P, ...)"
+            - pattern: "deepmerge($T, $P, ...)"
+            - pattern: "$L.mergeWith($T, $P, ...)"
+            - pattern: "$L.defaultsDeep($T, $P, ...)"
+            - pattern: "$L.merge($T, $P, ...)"
+            - pattern: "$L.assign($T, $P, ...)"
+            - pattern: "$L.extend($T, $P, ...)"
+            - pattern: "Object.assign($T, $P, ...)"
+        - pattern-not: "Object.assign({}, ...)"
+        - pattern-not: "_.merge({}, ...)"
+        - pattern-not: "$L.merge({}, ...)"
+        - metavariable-pattern:
+            metavariable: $P
+            patterns:
+              - pattern-not: "{ ... }"
+              - pattern-not: "[ ... ]"
+        - focus-metavariable: $P
+    - patterns:
+        - pattern: |
+            for (const $K in $P) { ... $T[$K] = $P[$K]; ... }
+        - focus-metavariable: $P
+    - patterns:
+        - pattern: |
+            for (let $K in $P) { ... $T[$K] = $P[$K]; ... }
+        - focus-metavariable: $P
+
+# ---------------------------------------------------------------------------------------------
+# Request headers or options taken from the payload
+# Payload fields spread or assigned into the headers or options of a product or remote request.
+# ---------------------------------------------------------------------------------------------
+- id: forge-request-headers-from-payload
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Request headers or the whole options object of a privileged request come from the client
+    payload. A caller can override Authorization, routing or content headers on a request the app
+    makes with its own or the user's credentials. Build headers from constants and copy only named,
+    validated values.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/ssrf.mdc"
+    cwe: ["CWE-113", "CWE-915"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "@forge/api request options"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  patterns:
+    - pattern-either:
+        - pattern: "$API.$M($URL, { ..., headers: payload.$F, ... })"
+        - pattern: "$API.$M($URL, { ..., headers: $R.payload.$F, ... })"
+        - pattern: "$API.$M($URL, { ..., headers: { ..., ...payload.$F, ... }, ... })"
+        - pattern: "$API.$M($URL, { ..., headers: { ..., ...$R.payload.$F, ... }, ... })"
+        - pattern: "$API.$M($URL, { ..., ...payload.$F, ... })"
+        - pattern: "$API.$M($URL, { ..., ...$R.payload.$F, ... })"
+        - pattern: "$API.$M($URL, payload.$F)"
+        - pattern: "$API.$M($URL, $R.payload.$F)"
+        - pattern: "$FN($URL, { ..., headers: payload.$F, ... })"
+        - pattern: "$FN($URL, { ..., headers: { ..., ...payload.$F, ... }, ... })"
+        - pattern: "$FN($URL, { ..., ...payload.$F, ... })"
+    - metavariable-regex:
+        metavariable: $M
+        regex: "^(requestJira|requestConfluence|requestBitbucket|requestCompass|requestGraph|fetch|invokeRemote)$"
+
+# ---------------------------------------------------------------------------------------------
+# Web trigger shared secret compared with a string literal
+# A header or query value compared with a literal: a hardcoded secret and a non-constant-time
+# comparison.
+# ---------------------------------------------------------------------------------------------
+- id: forge-webtrigger-literal-shared-secret
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    The web trigger authenticates the request by comparing a header or query parameter with a
+    string literal in the source. The secret ships with the app bundle and is identical for every
+    installation, so anyone who reads it can call the trigger on any site. Load the secret with
+    storage.getSecret() per installation and compare with crypto.timingSafeEqual().
+  metadata:
+    skill_rule: "assets/security-rules/forge-webtrigger-entrypoints/webtrigger-security.mdc"
+    cwe: ["CWE-798", "CWE-287"]
+    confidence: HIGH
+    security-severity: "8.5"
+    forge_surface: "webtrigger authentication"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  patterns:
+    - pattern-either:
+        - pattern: "$EVENT.headers[$H][0] !== \"$LIT\""
+        - pattern: "$EVENT.headers[$H][0] != \"$LIT\""
+        - pattern: "$EVENT.headers[$H][0] === \"$LIT\""
+        - pattern: "$EVENT.headers[$H][0] == \"$LIT\""
+        - pattern: "$EVENT.headers[$H] !== \"$LIT\""
+        - pattern: "$EVENT.headers[$H] === \"$LIT\""
+        - pattern: "$EVENT.headers.$H !== \"$LIT\""
+        - pattern: "$EVENT.headers.$H === \"$LIT\""
+        - pattern: "$EVENT.queryParameters.$K[0] !== \"$LIT\""
+        - pattern: "$EVENT.queryParameters.$K[0] != \"$LIT\""
+        - pattern: "$EVENT.queryParameters.$K[0] === \"$LIT\""
+        - pattern: "$EVENT.queryParameters.$K[0] == \"$LIT\""
+        - pattern: "$EVENT.queryParameters.$K !== \"$LIT\""
+        - pattern: "$EVENT.queryParameters.$K === \"$LIT\""
+        - pattern: "$EVENT.queryParameters[$K][0] !== \"$LIT\""
+        - pattern: "$EVENT.queryParameters[$K][0] === \"$LIT\""
+        - pattern: "\"$LIT\" !== $EVENT.headers[$H][0]"
+        - pattern: "\"$LIT\" === $EVENT.headers[$H][0]"
+        - pattern: "\"$LIT\" !== $EVENT.queryParameters.$K[0]"
+        - pattern: "\"$LIT\" === $EVENT.queryParameters.$K[0]"
+    - metavariable-regex:
+        metavariable: $EVENT
+        regex: "^(event|evt|ev|e|req|request|webtriggerEvent|webTriggerEvent|trigger)$"
+    - metavariable-regex:
+        metavariable: $LIT
+        regex: "^.{8,}$"
+
+# ---------------------------------------------------------------------------------------------
+# Private cross-tenant API
+# Calls to __requestAtlassian, which can address another tenant.
+# ---------------------------------------------------------------------------------------------
+- id: forge-private-cross-tenant-api
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    __requestAtlassian is a private @forge/api entry point that addresses a product site by cloud
+    id, which lets the app reach a tenant other than the installing one. It is unsupported and a
+    tenant-isolation risk. Use the public asApp()/asUser() product request methods for the
+    installing site only.
+  metadata:
+    skill_rule: "assets/security-rules/forge-tenant-isolation/_index-tenant-isolation.mdc"
+    cwe: ["CWE-668"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "@forge/api private API"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+  pattern-either:
+    - pattern: "$X.__requestAtlassian(...)"
+    - pattern: "__requestAtlassian(...)"
+
+# ---------------------------------------------------------------------------------------------
+# Custom UI: product data and context from @forge/bridge reaches an HTML sink
+# Sources: requestJira, requestConfluence, requestBitbucket and view.getContext(). Companion to
+# forge-bridge-invoke-to-html-sink.
+# ---------------------------------------------------------------------------------------------
+- id: forge-bridge-product-data-to-html-sink
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Data obtained through @forge/bridge (requestJira, requestConfluence, requestBitbucket, or
+    view.getContext) is written to an HTML sink in Custom UI. Issue, page and context fields are
+    written by other users, so this is stored XSS inside the app iframe. Render as text, or
+    sanitise with DOMPurify before inserting HTML.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/xss.mdc"
+    cwe: ["CWE-79"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "@forge/bridge + Custom UI DOM"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+  mode: taint
+  pattern-sources:
+    - pattern: "requestJira(...)"
+    - pattern: "requestConfluence(...)"
+    - pattern: "requestBitbucket(...)"
+    - pattern: "view.getContext()"
+    - pattern: "$V.getContext()"
+    - pattern: "$R.json()"
+  pattern-sanitizers:
+    - pattern: "DOMPurify.sanitize(...)"
+    - pattern: "$P.sanitize(...)"
+    - pattern: "sanitizeHtml(...)"
+    - pattern: "escapeHtml(...)"
+  pattern-sinks:
+    - patterns:
+        - pattern-either:
+            - pattern: "$D.innerHTML = $Y"
+            - pattern: "$D.outerHTML = $Y"
+            - pattern: "$D.insertAdjacentHTML($P, $Y)"
+            - pattern: "document.write($Y)"
+            - pattern: "<$EL dangerouslySetInnerHTML={{ __html: $Y }} />"
+            - pattern: "<$EL dangerouslySetInnerHTML={{ __html: $Y }}>...</$EL>"
+        - focus-metavariable: $Y
+
+# ---------------------------------------------------------------------------------------------
+# Custom UI: product data reaches an HTML sink (promise-callback form)
+# Same defect as forge-bridge-product-data-to-html-sink; taint does not cross .then callbacks.
+# ---------------------------------------------------------------------------------------------
+- id: forge-bridge-product-data-then-html-sink
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Data obtained through @forge/bridge (requestJira, requestConfluence, requestBitbucket, or
+    view.getContext) is written to an HTML sink inside the .then() callback. Issue, page and context
+    fields are written by other users, so this is stored XSS inside the app iframe.
+  metadata:
+    skill_rule: "assets/security-rules/forge-injection/xss.mdc"
+    cwe: ["CWE-79"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "@forge/bridge + Custom UI DOM"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+  patterns:
+    - pattern-either:
+        - pattern: "$SRC.then(($X) => { ... $D.innerHTML = <... $X ...>; ... })"
+        - pattern: "$SRC.then(($X) => { $D.innerHTML = <... $X ...> })"
+        - pattern: "$SRC.then(($X) => { ... $D.outerHTML = <... $X ...>; ... })"
+        - pattern: "$SRC.then(($X) => { ... $D.insertAdjacentHTML($P, <... $X ...>); ... })"
+        - pattern: "$SRC.then(($X) => { ... document.write(<... $X ...>); ... })"
+    - metavariable-pattern:
+        metavariable: $SRC
+        pattern-either:
+          - pattern: "view.getContext()"
+          - pattern: "$V.getContext()"
+          - pattern: "requestJira(...)"
+          - pattern: "requestConfluence(...)"
+          - pattern: "requestBitbucket(...)"
+          - pattern: "$Q.then(...)"
+
+# ---------------------------------------------------------------------------------------------
+# Credential-named value logged from Custom UI code
+# Credentials written to the browser console are visible to anyone with the page open, so this
+# covers only UI directories and only credential-named values. Backend logging is covered by
+# forge-sensitive-data-console-logging.
+# ---------------------------------------------------------------------------------------------
+- id: forge-ui-credential-console-logging
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    A credential-named value (token, secret, password, API key) is written to the browser console
+    from Custom UI code. Anyone with the page open, a support screenshot or a browser extension can
+    read it. Never log credentials; keep secrets server-side and return only the result of using them.
+  metadata:
+    skill_rule: "assets/security-rules/forge-auditing/_index-auditing.mdc"
+    cwe: ["CWE-532", "CWE-200"]
+    confidence: MEDIUM
+    security-severity: "6.0"
+    forge_surface: "Custom UI console"
+  paths:
+    include:
+      - "**/static/**"
+      - "**/frontend/**"
+      - "**/ui/**"
+      - "**/webui/**"
+      - "**/public/**"
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/static/static/js/**"
+  patterns:
+    - pattern-either:
+        - pattern: "console.$METHOD(..., $VAL, ...)"
+        - pattern: "console.$METHOD(..., { ..., $K: $VAL, ... }, ...)"
+        - pattern: "console.$METHOD(`...${$VAL}...`, ...)"
+    - metavariable-regex:
+        metavariable: $VAL
+        regex: "(?i)^[a-z0-9_$.]*(token|secret|password|passwd|credential|api_?key|private_?key|authorization)[a-z0-9_$]*$"
+    - metavariable-regex:
+        metavariable: $METHOD
+        regex: "^(log|info|debug|warn|error|trace)$"
+    - metavariable-pattern:
+        metavariable: $VAL
+        patterns:
+          - pattern-not: "$A.length"
+          - pattern-not: "$A.status"
+
+# ---------------------------------------------------------------------------------------------
+# Basic auth built from a stored bot credential or app password
+# Companion to forge-atlassian-api-token-basic-auth, which already reports Basic auth sent to
+# Bitbucket hosts; this rule reports the credential construction wherever the header is sent.
+# ---------------------------------------------------------------------------------------------
+- id: forge-bitbucket-basic-auth-credential
+  languages: [javascript, typescript]
+  severity: ERROR
+  message: >
+    Basic authentication is built from a stored bot credential or app password (typically for
+    Bitbucket Cloud).
+    App passwords and bot tokens are long-lived personal credentials that bypass the app's declared
+    scopes and the user's identity. Use api.asApp()/asUser().requestBitbucket() with manifest
+    scopes instead.
+  metadata:
+    skill_rule: "assets/security-rules/forge-secrets-storage/hardcoded-secrets.mdc"
+    cwe: ["CWE-522"]
+    confidence: HIGH
+    security-severity: "7.5"
+    forge_surface: "Bitbucket Cloud REST"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  pattern-either:
+    - patterns:
+        - pattern-either:
+            - pattern: "Buffer.from(`...${$TOKEN}`, ...)"
+            - pattern: "Buffer.from(`...${$TOKEN}`)"
+            - pattern: "btoa(`...${$TOKEN}`)"
+        - pattern-regex: ":\\$\\{"
+        - metavariable-regex:
+            metavariable: $TOKEN
+            regex: "(?i)(bot_?(token|password|pass)|service_?(token|password|account)|app_?password|appPassword)"
+
+# ---------------------------------------------------------------------------------------------
+# Resolver changes installation-wide state with no permission evidence
+# A resolver can be invoked directly whatever modules display. WARNING: the reviewer confirms
+# which modules can reach the resolver and whether a permission check lives in a helper.
+# ---------------------------------------------------------------------------------------------
+- id: forge-resolver-global-write-without-permission-check
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    This resolver writes installation-wide state (a storage record with a fixed key, or an asApp()
+    write to the product) and shows no permission check. Any user who can reach the app's frontend,
+    or who invokes the resolver directly through the Forge GraphQL API, can trigger it; module
+    placement and display conditions are not authorization. Check the caller's permission in the
+    handler (for example /rest/api/3/mypermissions or a group lookup) before the write.
+  metadata:
+    skill_rule: "assets/security-rules/forge-authn-authz/missing-resolver-authz.mdc"
+    cwe: ["CWE-862", "CWE-285"]
+    confidence: MEDIUM
+    security-severity: "7.5"
+    forge_surface: "@forge/resolver + storage / asApp() writes"
+    requires_manifest_correlation: true
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  patterns:
+    - pattern: "resolver.define($N, $H)"
+    - metavariable-pattern:
+        metavariable: $H
+        pattern-either:
+          - pattern: |
+              async (...) => { ... storage.set("...", ...); ... }
+          - pattern: |
+              async (...) => { ... storage.set('...', ...); ... }
+          - pattern: |
+              async (...) => { ... storage.delete("..."); ... }
+          - pattern: |
+              async (...) => { ... storage.delete('...'); ... }
+          - pattern: |
+              async (...) => { ... kvs.set("...", ...); ... }
+          - pattern: |
+              async (...) => { ... kvs.set('...', ...); ... }
+          - pattern: |
+              async (...) => { ... kvs.delete("..."); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: "POST", ... }); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: "PUT", ... }); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: "DELETE", ... }); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: "PATCH", ... }); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: 'POST', ... }); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: 'PUT', ... }); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: 'DELETE', ... }); ... }
+          - pattern: |
+              async (...) => { ... $API.asApp().$M($U, { ..., method: 'PATCH', ... }); ... }
+    - pattern-not-regex: "(?i)(permission|authoriz|isAdmin|requireAdmin|adminOnly|onlyAdmin|withAdmin|ensureAdmin|assertAdmin|requireRole|hasRole|checkRole|guard\\.|withAuth|hasPermission|checkPermission|isSiteAdmin|mypermissions|/myself|context\\.accountId|accountId\\s*[!=]==?|license|groups|Forbidden|Unauthori|403|installContext|extension\\.(project|space|issue|content)\\b.*(admin|lead|owner))"
+    - focus-metavariable: $N
+
+# ---------------------------------------------------------------------------------------------
+# Model output drives a privileged action
+# A model reply is the condition for a storage write, an asApp() mutation, an invokeRemote call
+# or a fetch with a method.
+# ---------------------------------------------------------------------------------------------
+- id: forge-llm-output-drives-privileged-action
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >
+    A value returned by a language-model call decides whether the app performs a privileged
+    action (an asApp() write, a storage write or a remote call). The model reads content written
+    by other users, so a prompt injection in an issue, page or pull request can trigger the action.
+    Decide the action in code from structured data; treat the model's reply as untrusted text.
+  metadata:
+    skill_rule: "assets/security-rules/forge-rovo-agents/agent-privilege-escalation.mdc"
+    cwe: ["CWE-807", "CWE-1426"]
+    confidence: MEDIUM
+    security-severity: "7.0"
+    forge_surface: "Rovo / AI app actions"
+  paths:
+    exclude:
+      - "**/node_modules/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/__tests__/**"
+      - "**/*.test.js"
+      - "**/*.test.ts"
+  patterns:
+    - pattern-either:
+        - pattern-inside: |
+            const $REPLY = await $FN(...);
+            ...
+        - pattern-inside: |
+            const $REPLY = await $OBJ.$FN(...);
+            ...
+        - pattern-inside: |
+            let $REPLY = await $FN(...);
+            ...
+        - pattern-inside: |
+            let $REPLY = await $OBJ.$FN(...);
+            ...
+        - pattern-inside: |
+            const $REPLY = $FN(...);
+            ...
+        - pattern-inside: |
+            const $REPLY = $OBJ.$FN(...);
+            ...
+    - pattern-either:
+        - pattern: "if (<... $REPLY ...>) { ... $API.asApp().$M(...); ... }"
+        - pattern: "if (<... $REPLY ...>) { ... asApp().$M(...); ... }"
+        - pattern: "if (<... $REPLY ...>) { ... storage.set(...); ... }"
+        - pattern: "if (<... $REPLY ...>) { ... storage.delete(...); ... }"
+        - pattern: "if (<... $REPLY ...>) { ... kvs.set(...); ... }"
+        - pattern: "if (<... $REPLY ...>) { ... invokeRemote(...); ... }"
+        - pattern: "if (<... $REPLY ...>) { ... $API.fetch($U, { ..., method: $MM, ... }); ... }"
+        - pattern: "if (<... $REPLY ...>) { ... fetch($U, { ..., method: $MM, ... }); ... }"
+    - metavariable-regex:
+        metavariable: $FN
+        regex: "(?i)(llm|openai|anthropic|bedrock|gemini|rovo|chat|completion|prompt|ask_?ai|askllm|generate|invokeModel|converse|claude|gpt|assistant)"
+
+# ---------------------------------------------------------------------------------------------
+# Manifest rules: wildcard and tunnel egress
+# Regex-based so they work on both a YAML manifest and a single-line JSON manifest. Style
+# unsafe-inline, manage:* scopes and *.atlassian.net style wildcards are common and are not
+# reported.
+#
+# A '*' entry under fetch.backend, fetch.client or scripts removes the app's only control over
+# where it sends data and loads code.
+# ---------------------------------------------------------------------------------------------
+- id: forge-manifest-wildcard-egress
+  languages: [generic]
+  severity: ERROR
+  message: >
+    The manifest allows backend or client fetch (or script loading) from any host ("*"). The
+    egress allowlist is the app's only control over where it can send data and load code; a
+    wildcard removes it and turns any URL-handling bug into unrestricted SSRF or data exfiltration.
+    List the exact hosts the app needs.
+  metadata:
+    skill_rule: "assets/security-rules/forge-egress-remotes/wildcard-permissions.mdc"
+    cwe: ["CWE-918", "CWE-284"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "manifest permissions.external.fetch / scripts"
+  paths:
+    include:
+      - "**/manifest.yml"
+      - "**/manifest.yaml"
+  pattern-either:
+    - pattern-regex: "\"(backend|client|scripts)\"\\s*:\\s*\\[[^\\]]*\"\\*\"[^\\]]*\\]"
+    - pattern-regex: "\"(backend|client|scripts)\"\\s*:\\s*\\[[^\\]]*\"address\"\\s*:\\s*\"\\*\""
+    - pattern-regex: "(?ms)^\\s*(backend|client|scripts):\\s*\\n(?:\\s*-\\s[^\\n]*\\n)*?\\s*-\\s*(?:address:\\s*)?['\"]?\\*['\"]?\\s*$"
+
+# ---------------------------------------------------------------------------------------------
+# Developer tunnel host allowed for egress
+# ngrok, localtunnel, Cloudflare quick tunnels and similar hosts belong to a development session.
+# ---------------------------------------------------------------------------------------------
+- id: forge-manifest-dev-tunnel-egress
+  languages: [generic]
+  severity: ERROR
+  message: >
+    The manifest allows egress to a development tunnel service (ngrok, localtunnel, Cloudflare
+    quick tunnels or similar). Tunnel hostnames are reassigned to other users, so production
+    traffic can reach an attacker-controlled endpoint; a tunnel entry in a published manifest is
+    almost always a leftover from local testing. Remove it before release.
+  metadata:
+    skill_rule: "assets/security-rules/forge-manifest-config/egress-url-entries.mdc"
+    cwe: ["CWE-918", "CWE-668"]
+    confidence: HIGH
+    security-severity: "8.0"
+    forge_surface: "manifest permissions.external"
+  paths:
+    include:
+      - "**/manifest.yml"
+      - "**/manifest.yaml"
+  pattern-regex: "(?i)(ngrok(-free)?\\.(io|app|dev)|localtunnel\\.me|loca\\.lt|trycloudflare\\.com|serveo\\.net|localhost\\.run|tunnelmole\\.(com|net)|localtonet\\.com|pinggy\\.io)"
+
+# ---------------------------------------------------------------------------------------------
+# Wildcard over a shared hosting or CDN domain
+# A wildcard such as *.cloudfront.net admits every tenant of that provider. Atlassian platform and
+# analytics vendor domains are not reported.
+# ---------------------------------------------------------------------------------------------
+- id: forge-manifest-shared-hosting-wildcard-egress
+  languages: [generic]
+  severity: WARNING
+  message: >
+    The manifest allows egress to every subdomain of a shared-hosting or object-storage service
+    (for example *.cloudfront.net, *.amazonaws.com, *.googleapis.com, *.github.io). Anyone can
+    create a hostname under these domains, so the allowlist no longer limits where the app can send
+    data or load code from. Replace the wildcard with the exact hostnames the app uses.
+  metadata:
+    skill_rule: "assets/security-rules/forge-egress-remotes/wildcard-permissions.mdc"
+    cwe: ["CWE-918"]
+    confidence: MEDIUM
+    security-severity: "6.0"
+    forge_surface: "manifest permissions.external"
+  paths:
+    include:
+      - "**/manifest.yml"
+      - "**/manifest.yaml"
+  pattern-regex: "(?i)\\*\\.(cloudfront\\.net|amazonaws\\.com|s3\\.[a-z0-9.-]*amazonaws\\.com|googleapis\\.com|storage\\.googleapis\\.com|appspot\\.com|web\\.app|firebaseapp\\.com|github\\.io|githubusercontent\\.com|herokuapp\\.com|azurewebsites\\.net|blob\\.core\\.windows\\.net|vercel\\.app|netlify\\.app|pages\\.dev|workers\\.dev|onrender\\.com|fly\\.dev|glitch\\.me|repl\\.co|wp\\.com|wordpress\\.com|blogspot\\.com|surge\\.sh|digitaloceanspaces\\.com|backblazeb2\\.com|r2\\.dev)"
+
+# ---------------------------------------------------------------------------------------------
+# Script CSP relaxed with unsafe-eval or unsafe-inline
+# Reports unsafe-eval and unsafe-inline under permissions.content.scripts only. Style
+# unsafe-inline, wasm-unsafe-eval and external script host lists are not reported. Use the
+# result to decide how closely to review Custom UI HTML sinks.
+# ---------------------------------------------------------------------------------------------
+- id: forge-manifest-csp-unsafe-script-directive
+  languages: [generic]
+  severity: WARNING
+  message: >
+    The manifest relaxes the Custom UI script policy with unsafe-eval or unsafe-inline for
+    scripts. unsafe-eval lets any injected string run as code, and unsafe-inline for scripts
+    disables the main defence against XSS inside the app iframe. Confirm the build genuinely
+    needs it; prefer bundled scripts, and hashes or nonces for unavoidable inline code. Check the
+    Custom UI code for HTML sinks fed by user or product data. (unsafe-inline for styles is
+    common and is not reported.)
+  metadata:
+    skill_rule: "assets/security-rules/forge-manifest-config/content-security-policy.mdc"
+    cwe: ["CWE-79", "CWE-1021"]
+    confidence: MEDIUM
+    security-severity: "5.5"
+    forge_surface: "manifest permissions.content.scripts"
+  paths:
+    include:
+      - "**/manifest.yml"
+      - "**/manifest.yaml"
+  pattern-either:
+    - pattern-regex: "\"scripts\"\\s*:\\s*\\[[^\\]]*\"'?unsafe-(eval|inline)'?\""
+    - pattern-regex: "(?ms)^\\s*scripts:\\s*\\n(?:\\s*-\\s[^\\n]*\\n)*?\\s*-\\s*['\"]?unsafe-(eval|inline)['\"]?\\s*(?:#[^\\n]*)?$"
+    - pattern-regex: "(?m)^\\s*scripts:\\s*\\[(?:[^\\]\\n]*,)?\\s*['\"]?unsafe-(eval|inline)['\"]?\\s*[,\\]]"

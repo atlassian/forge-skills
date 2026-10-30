@@ -149,6 +149,13 @@ Remediation Guidance (advisory)
 - Block private IP ranges, localhost, and metadata endpoints.
 - Implement request timeouts and response size limits.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-api-fetch-tainted-url` (ERROR): request data reaches the URL argument of `fetch`, `api.fetch`, `asApp().fetch` or `asUser().fetch`. Constant allowlist lookups keyed by the input and `encodeURIComponent` count as sanitisers; an app-specific validator does not, so read it before downgrading.
+- `forge-assume-trusted-route-dynamic-path` (ERROR): request data inside an `assumeTrustedRoute` template, which disables the encoding that `route` provides.
+- `forge-invoke-remote-dynamic-path` (ERROR): request data in the path or options of `invokeRemote()` to a Forge remote.
+- `forge-request-headers-from-payload` (ERROR): payload fields spread or assigned into the `headers` or options of a product or remote request (header injection, credential override).
+
 Reporting Guidance
 
 - Document the vulnerable request construction.

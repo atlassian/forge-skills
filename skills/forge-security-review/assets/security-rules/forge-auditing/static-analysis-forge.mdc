@@ -6,149 +6,87 @@ alwaysApply: false
 
 Context
 
-- Static analysis for Forge apps requires Forge-specific rules in addition to standard JavaScript/TypeScript scanning.
-- Key tools: FSRT (Forge Static Review Tool), Semgrep, Snyk, ESLint security plugins.
+- Static analysis for Forge apps needs Forge-specific rules in addition to standard JavaScript/TypeScript scanning: the dangerous sinks are Forge APIs (`asApp()`, `storage`, `sql`, `invokeRemote`, web trigger handlers) and the manifest, not generic Node.js calls.
+- The skill ships a deterministic layer for exactly this: FSRT (Forge Security Requirements Tester, Atlassian Labs) plus OpenGrep running the Forge rules under `assets/opengrep-rules/`. Both are pinned by release and SHA-256 and run by one script.
+- Deterministic results are leads, not verdicts. Every hit still goes through the source -> validation/authz -> sink trace and CVSS v3.1 scoring described in the global baseline.
 
-Forge-Specific SAST Tools
-
-Semgrep for Forge
-
-```bash
-# Install semgrep
-brew install semgrep  # macOS
-# or
-pip install semgrep
-
-# Run with JavaScript security rules
-semgrep --config p/javascript > semgrep-js.json
-semgrep --config p/typescript > semgrep-ts.json
-semgrep --config p/nodejsscan > semgrep-node.json
-
-# Run with custom Forge rules
-semgrep --config ./forge-rules/ > semgrep-forge.json
-```
-
-Custom Semgrep Rules for Forge
-
-```yaml
-# forge-sql-injection.yaml
-rules:
-  - id: forge-sql-injection-executeraw
-    patterns:
-      - pattern-either:
-          - pattern: sql.executeRaw(`... ${$VAR} ...`)
-          - pattern: sql.executeRaw("..." + $VAR + "...")
-    message: "SQL injection risk in sql.executeRaw - use bindParams"
-    severity: ERROR
-    languages: [javascript, typescript]
-
-  - id: forge-sql-injection-prepare
-    patterns:
-      - pattern: sql.prepare(`... ${$VAR} ...`).execute()
-    message: "SQL injection risk - prepare without bindParams"
-    severity: ERROR
-    languages: [javascript, typescript]
-
-  - id: forge-asapp-no-authz
-    patterns:
-      - pattern: |
-          resolver.define($NAME, async ({ payload, context }) => {
-            ...
-            const $API = asApp();
-            ...
-          })
-      - pattern-not: |
-          resolver.define($NAME, async ({ payload, context }) => {
-            ...
-            if (...) { throw ... }
-            ...
-            const $API = asApp();
-            ...
-          })
-    message: "asApp() without apparent authorization check"
-    severity: WARNING
-    languages: [javascript, typescript]
-
-  - id: forge-dangerouslysetinnerhtml
-    pattern: dangerouslySetInnerHTML={{ __html: $VAR }}
-    message: "dangerouslySetInnerHTML - verify XSS sanitization"
-    severity: WARNING
-    languages: [javascript, typescript]
-
-  - id: forge-dynamic-code-execution
-    patterns:
-      - pattern-either:
-          - pattern: new Function(...)
-          - pattern: new AsyncFunction(...)
-          - pattern: eval(...)
-    message: "Dynamic code execution - high RCE risk"
-    severity: ERROR
-    languages: [javascript, typescript]
-```
-
-Snyk for SCA
+Deterministic Layer (run first)
 
 ```bash
-# Scan dependencies for vulnerabilities
-snyk test --severity-threshold=low --json > snyk-results.json
-
-# Key checks:
-# - Known CVEs in dependencies
-# - Outdated packages
-# - License compliance
+# From the skill directory. Downloads the pinned binaries on first use and verifies their checksums.
+scripts/run_static_analysis.sh <forge-project-root>      # macOS / Linux
+scripts/run_static_analysis.ps1 <forge-project-root>     # Windows (PowerShell 7)
 ```
 
-Analysis Workflow
+Outputs, all under `<forge-project-root>/security-audit-artifacts/`:
+
+| File | Content |
+|------|---------|
+| `static-analysis-summary.json` | Per-tool status (`completed`, `completed_with_errors`, `completed_with_warnings`, `skipped`, `not_run`), versions, finding counts |
+| `fsrt/report.json` | FSRT findings (`vulns[]` with `check_name`, `description`, `proof`, `severity`, `marketplace_security_requirement`) |
+| `fsrt/fsrt.log` | FSRT log; `Could not scan` / `Unable to scan` lines mean the project was not analysed |
+| `opengrep/results.json` | OpenGrep findings (`results[]` with `check_id`, `path`, `start`/`end`, `extra.severity`, `extra.message`, `extra.metadata`) and file-level `errors[]` |
+| `opengrep/results.sarif` | Same findings as SARIF 2.1.0 for IDE and CI viewers |
+| `opengrep/opengrep.log` | OpenGrep console output |
+
+Reading the summary:
+
+- Exit code 0 means every tool completed. Exit code 1 means at least one tool is `not_run`: it did not analyse the project, so its empty result is not evidence of anything. Record it in the report's coverage section and review that category manually.
+- `completed_with_errors` (OpenGrep) lists files it could not parse or that timed out under `errors[]`; name them as coverage gaps.
+- FSRT needs network access to developer.atlassian.com on its first run to cache Atlassian API specifications; without it the tool exits non-zero and is reported `not_run`.
+- FSRT cannot analyse projects whose source is already transpiled (a `"use strict";` first line); the log says so. Review such projects with the OpenGrep results and manual tracing only.
+
+Using the OpenGrep Findings
+
+- `extra.metadata.skill_rule` names the rule file under `assets/security-rules/` to apply to the hit. Open it and run its Detection Checklist on the flagged location before reporting.
+- `extra.severity` is the rule's confidence: `ERROR` means the matched code is the defect (a user-controlled value reached the sink without a recognised sanitiser); `WARNING` means the location is the right place to look and the message says what must still be confirmed.
+- `extra.metadata.security-severity` is an ordering hint. The reported severity is always your own CVSS v3.1 score.
+- Rules marked `requires_manifest_correlation: true` (web trigger authentication) must be checked against `manifest.yml`: resolve `modules.webtrigger[].function` to `modules.function[].handler` and drop any hit whose function is not a declared web trigger handler. Say that you dropped it.
+- Group WARNING findings from the same rule by their key or template (for example one storage-key template per app) and triage the template once.
+- FSRT and an OpenGrep rule can flag the same location (for example literal JWT secrets, Basic auth with Atlassian API tokens, `asApp()` calls without a permission check). Report each location once and cite every tool that flagged it.
+- The rules are intra-procedural. A caller-controlled id that reaches `asApp()` through a helper function parameter is not flagged; list every `asApp()` call site yourself and trace helper parameters back to resolver payloads.
+
+Rules
+
+| File | Rules | Scope |
+|------|-------|-------|
+| `assets/opengrep-rules/forge-security-rules.yaml` | 44 (31 ERROR, 13 WARNING) | tainted `asApp()` routes, fetch, `invokeRemote` and `assumeTrustedRoute` paths, JQL/CQL (in URLs and POST bodies) and Forge SQL taint, web trigger authentication and literal shared secrets, module-scope request state and `process.env` mutation, storage keys built from user input, context identifiers with payload fallbacks and payload identity used for authorization, prototype pollution through payload merges, request headers from the payload, sandbox escapes, secrets returned to the client, kept in plain storage or used in Basic auth, the private cross-tenant API, Custom UI HTML sinks fed by `invoke()` or product data, installation-wide writes without a permission check, model output driving privileged actions, and manifest settings (anonymous access, wildcard, shared-hosting and tunnel egress, unsafe script CSP directives) |
+
+Validate the rules after editing them: `opengrep --validate --config assets/opengrep-rules`. Run the fixture tests: `python -m unittest discover -s tests` from the skill directory (see `evals/`).
+
+Additional Scanners (when available)
+
+These are not bundled. Run them when available; if one is missing, install it and tell the user what was installed, or record the gap in the coverage section.
 
 ```bash
-# 1. Manifest Analysis
-cat manifest.yml | yq '.permissions'
-# Check scopes, external permissions, CSP
+# Dependency vulnerabilities (write results under security-audit-artifacts/)
+npm audit --json > security-audit-artifacts/npm-audit.json
+snyk test --json > security-audit-artifacts/snyk-results.json
 
-# 2. FSRT Scan
-fsrt scan --path . --output fsrt-results.json
-
-# 3. Semgrep Scan
-semgrep --config p/javascript --config p/typescript \
-  --config ./forge-rules/ --json > semgrep-results.json
-
-# 4. Dependency Scan
-snyk test --json > snyk-results.json
-npm audit --json > npm-audit.json
-
-# 5. Secret Scanning
-gitleaks detect --source . --report-format json > secrets.json
-
-# 6. Triage and Correlate
-# Combine results, remove duplicates, prioritize
+# Secret scanning
+gitleaks detect --source . --report-format json --report-path security-audit-artifacts/gitleaks.json
 ```
 
 Detection Patterns Summary
 
 | Category | Pattern | Tool |
 |----------|---------|------|
-| SQL Injection | `sql.executeRaw(\`...${}\`)` | Semgrep |
-| XSS | `dangerouslySetInnerHTML` + unsafe-inline | Semgrep + Manifest |
-| RCE | `new Function()`, `eval()` | Semgrep |
-| AuthZ | `asApp()` without checks | FSRT, Semgrep |
-| Secrets | Basic auth, API keys | Gitleaks, FSRT |
-| Dependencies | CVEs in node_modules | Snyk, npm audit |
+| IDOR / privilege misuse | user-controlled id in an `asApp()` request path or JQL body | OpenGrep `forge-asapp-user-input-in-path`, `forge-asapp-query-in-request-body`; FSRT authorization checker |
+| SSRF | user-controlled URL or path in `fetch`, `assumeTrustedRoute`, `invokeRemote` | OpenGrep `forge-api-fetch-tainted-url`, `forge-assume-trusted-route-dynamic-path`, `forge-invoke-remote-dynamic-path` |
+| SQL injection | request data reaching `sql.executeRaw` / `prepare` text | OpenGrep `forge-dynamic-raw-sql-query` |
+| XSS | `invoke()` or product data into `innerHTML` / `dangerouslySetInnerHTML`; interpolated HTML responses | OpenGrep `forge-bridge-invoke-to-html-sink`, `forge-bridge-product-data-to-html-sink`, `forge-webtrigger-html-response-interpolation` |
+| RCE / sandbox | `eval`, `new Function`, `child_process`, `fs` in backend code | OpenGrep `forge-sandbox-no-*` |
+| Web trigger auth | declared handler without verification code; literal shared secret | OpenGrep `forge-webtrigger-missing-auth`, `forge-webtrigger-literal-shared-secret` (manifest correlation required) |
+| Secrets | literal JWT secret, Atlassian API token in Basic auth, secret returned to the client, token in plain storage | OpenGrep `forge-jwt-literal-secret`, `forge-atlassian-api-token-basic-auth`, `forge-resolver-returns-secret`, `forge-token-in-plain-storage`; FSRT secret checker |
+| Tenant isolation | request or tenant data written to module scope; `process.env` mutation; private cross-tenant API | OpenGrep `forge-module-state-holds-request-data`, `forge-process-env-mutation`, `forge-private-cross-tenant-api` |
+| Manifest | anonymous access, `*` egress, tunnel hosts, shared-hosting wildcards | OpenGrep `forge-manifest-*` |
+| Dependencies | known CVEs | npm audit, Snyk |
 
 False Positive Reduction
 
-```yaml
-# Exclude test files
-semgrep --exclude='**/test/**' --exclude='**/*.test.*'
-
-# Exclude node_modules
-semgrep --exclude='**/node_modules/**'
-
-# Exclude webpack output
-semgrep --exclude='**/webpack/**' --exclude='**/dist/**'
-
-# Exclude bundled/minified files
-semgrep --exclude='**/*.min.js' --exclude='**/bundled/**'
-```
+- The wrapper already excludes `node_modules`, `dist`, `build`, `.next`, `out`, `coverage`, `vendor`, `security-audit-artifacts`, minified and bundled files and source maps. It scans Custom UI source under `static/`.
+- A hit inside vendored or generated code that survived those excludes is a coverage note, not a finding.
+- Sanitisers the rules recognise include `encodeURIComponent`, `Number`/`parseInt`, schema `.parse()`, `pick()`, `DOMPurify.sanitize`, constant allowlist lookups and `storage.getSecret` results used as inputs. A different, app-specific sanitiser is a reason to downgrade after you have read it, not a reason the rule is wrong.
 
 Triage Guidance
 
@@ -157,13 +95,13 @@ Triage Guidance
    - SQL injection with user input
    - RCE via dynamic code execution
    - Hardcoded production secrets
-   - asApp without authorization
+   - asApp() reached with a caller-controlled identifier and no permission check
 
 2. High Priority:
    - XSS with unsafe-inline CSP
    - Prototype pollution
-   - Web trigger without auth
-   - Global state tenant isolation
+   - Web trigger without authentication
+   - Global state holding tenant or request data
 
 3. Medium Priority:
    - Excessive scopes
@@ -181,13 +119,13 @@ Reporting Template
 
 ```markdown
 ## Finding: [Title]
-- **Severity**: Critical/High/Medium/Low
+- **Severity**: Critical/High/Medium/Low (CVSS v3.1 vector and score)
 - **Category**: SQLi/XSS/AuthZ/etc.
-- **Tool**: Semgrep/FSRT/Snyk
+- **Tool**: OpenGrep <rule id> / FSRT <check> / manual
 - **File**: path/to/file.js
 - **Line**: 42
 - **Pattern**: `sql.executeRaw(\`SELECT * FROM users WHERE id = ${userId}\`)`
-- **Data Flow**: payload.userId → resolver → sql.executeRaw
+- **Data Flow**: payload.userId -> resolver -> sql.executeRaw
 - **CWE**: CWE-89
 - **Remediation**: Use sql.prepare with bindParams
 ```
@@ -195,18 +133,24 @@ Reporting Template
 Reporting Requirements
 
 ```text
+Every report includes a "Coverage and evidence gaps" section listing:
+- each deterministic tool that ran, with its version and status from static-analysis-summary.json
+- each tool that was skipped or not_run, and why
+- files OpenGrep could not analyse (errors[]) and projects FSRT could not scan
+- category index rules that were not loaded
+An incomplete analysis must never be presented as a clean result.
+
 For npm audit and snyk, deduplicated analysis report per unique vuln, ensure you print:
 - package name
 - installed/resolved vulnerable version
 - vulnerable semver range
-- fixed version(s) or explicit “no fix available”
+- fixed version(s) or explicit "no fix available"
 - upgrade path (direct/transitive)
 - severity, CVE/GHSA/CWE
 - evidence path from lockfile and scanner JSON
 Do not return only counts when vulnerabilities exist.
 
 All generated scan outputs MUST be written under a single directory:
-  `/security-audit-artifacts/`
-- NEVER write outputs or scanner artifacts to project root.
+  `security-audit-artifacts/` in the project root
+- NEVER write outputs or scanner artifacts elsewhere in the project.
 ```
-
