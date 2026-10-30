@@ -1,0 +1,23 @@
+# Analysis fixture, not a deployable app.
+modules:
+  jira:issuePanel:
+    - key: jira-panel
+      displayConditions:
+        or:
+          hasGlobalPermission: ADMINISTER
+          or:
+            hasGlobalPermission: CREATE_PROJECT
+  jiraServiceManagement:portalRequestDetail:
+    - key: portal-detail
+      displayConditions:
+        or:
+          isLoggedIn: true
+          or:
+            isSiteAdmin: true
+  confluence:contentBylineItem:
+    - key: confluence-item
+      displayConditions:
+        or:
+          entityPropertyExists: {entity: user, propertyKey: a}
+          or:
+            entityPropertyExists: {entity: user, propertyKey: b}

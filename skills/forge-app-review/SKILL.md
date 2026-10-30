@@ -29,6 +29,7 @@ Use another skill instead when the user's primary intent is:
 
 - Deep security audit, SAST, authz, secrets, tenant isolation, exploitability, or CVSS reporting -> `forge-security-review`.
 - Cost optimization, invocations, GB-seconds, storage/log volume, trigger frequency, or memory tuning -> `forge-cost-optimizer`.
+- Simplifying or verifying display condition boolean expressions -> `forge-display-conditions`.
 - A known failure, error message, blank UI, failed deploy/install, broken resolver, missing app, or logs/tunnel diagnosis -> `forge-debugger`.
 
 If a broad review finds a deep security/cost/debug concern, include it as a handoff recommendation rather than duplicating the specialist workflow.

@@ -1,0 +1,55 @@
+{
+  "skill_name": "forge-display-conditions",
+  "evals": [
+    {
+      "id": "review-legacy-chains",
+      "prompt": "Review my Forge manifest for display conditions that could use the new composite arrays. Show simpler equivalents, but do not edit anything.",
+      "expected_output": "Verified suggestions for the permission and property conditions with source locations, before/after YAML and no file changes.",
+      "files": ["evals/fixtures/legacy/manifest.yml"],
+      "expectations": [
+        "Locates the manifest and passes its explicit file path to the JSON-only analyzer",
+        "Reads original excerpts from source, presents after_yaml unchanged, and reports equivalence results",
+        "Preserves all predicate parameters and explains the simplified conditions",
+        "Treats old object syntax as supported, not deprecated",
+        "Does not edit or deploy"
+      ]
+    },
+    {
+      "id": "apply-selected-suggestion",
+      "prompt": "Simplify only permission-panel using composite arrays. Keep comments and other modules unchanged, validate locally, and do not deploy.",
+      "expected_output": "A minimal verified edit to permission-panel with its comment preserved and validation results reported honestly.",
+      "files": ["evals/fixtures/legacy/manifest.yml"],
+      "expectations": [
+        "Re-reads and verifies the expression before editing",
+        "Changes only permission-panel and preserves its comment and scalar types",
+        "Checks the edited expression against the verified candidate",
+        "Attempts Forge lint or reports the blocker without claiming this partial fixture is a deployable app",
+        "Does not deploy or fix unrelated fixture errors"
+      ]
+    },
+    {
+      "id": "mixed-products",
+      "prompt": "Review this Jira, JSM and Confluence manifest for safe composite-array simplifications.",
+      "expected_output": "Verified Jira/JSM suggestions and an explicit Confluence skip.",
+      "files": ["evals/fixtures/mixed-products/manifest.yml"],
+      "expectations": [
+        "Distinguishes each module's product",
+        "Suggests supported Jira/JSM rewrites",
+        "Explains Confluence's narrower array support and skips its conditions",
+        "Does not edit without permission"
+      ]
+    },
+    {
+      "id": "no-change",
+      "prompt": "Check this manifest for worthwhile composite-array simplifications.",
+      "expected_output": "No supported array simplifications found; existing readable expressions are left unchanged.",
+      "files": ["evals/fixtures/readable/manifest.yaml"],
+      "expectations": [
+        "Discovers manifest.yaml",
+        "Does not convert flat object expressions just to use arrays",
+        "Leaves readable arrays unchanged",
+        "Does not claim performance or security benefits"
+      ]
+    }
+  ]
+}
