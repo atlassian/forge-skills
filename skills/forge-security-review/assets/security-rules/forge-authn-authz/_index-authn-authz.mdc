@@ -6,7 +6,7 @@ alwaysApply: false
 ---
 
 - Scope: Authentication mechanisms, authorization checks, privilege boundaries, and access control in Forge apps.
-- Priority: Broken Authentication and Session Management is the #1 bug bounty category (~43% of submissions).
+- Priority: Broken authentication and authorization are high-impact in Forge apps because an exposed resolver or web trigger can be invoked directly.
 
 Key Forge AuthN/AuthZ Risks
 
@@ -14,7 +14,7 @@ Key Forge AuthN/AuthZ Risks
 - Display conditions are NOT authorization: Display conditions only hide UI; attackers can invoke modules directly via GraphQL.
 - Web triggers lack built-in auth: Must implement custom authentication and validation.
 - Resolver-side authorization missing: Client-provided context is untrusted; all sensitive actions require server-side checks.
-- Forge context manipulation: Elements of context can be attacker-controlled (EPSP-300).
+- Forge context manipulation: Elements of context can be attacker-controlled.
 
 Subrules
 

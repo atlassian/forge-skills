@@ -270,6 +270,14 @@ Remediation Guidance (advisory)
 - Query Atlassian APIs or stored data to verify permissions.
 - Return generic errors that don't leak information about resource existence.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-storage-key-user-controlled` (ERROR): a raw payload value is the storage key (`storage.get(payload.key)`), so the caller can read or overwrite any record; a generic storage-proxy resolver is the typical shape.
+- `forge-storage-tainted-key` (WARNING): a payload value is part of a prefixed or computed key. Group the hits by key template and confirm once per template whether the caller may address other users' or tenants' records; keys bound to `context.accountId` or `context.cloudId` are excluded.
+- `forge-resolver-global-write-without-permission-check` (WARNING): a resolver writes installation-wide state (a fixed storage key, or an `asApp()` POST/PUT/PATCH/DELETE) with no permission evidence in the handler. Any UI module can be invoked directly, so look for the check in a helper or report the direct-invocation path.
+- `forge-hardcoded-account-gate` (ERROR): authorization decided by comparing the caller with a literal account id or a hardcoded list.
+- `forge-manifest-anonymous-access-module` (WARNING): a module declares `access: anonymous` or `unlicensedAccess`; every resolver reachable from it runs for unauthenticated callers, so each of its writes needs its own check.
+
 Reporting Guidance
 
 - Document each resolver lacking authorization with its function name and file location.

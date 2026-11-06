@@ -6,7 +6,7 @@ alwaysApply: false
 ---
 
 - Scope: Injection vulnerabilities due to lack of input validation in Forge apps including SQL, command, XSS, prototype pollution, and code execution.
-- Priority: Injection vulnerabilities are the #2 category for P1 severity findings.
+- Priority: Injection vulnerabilities (SQL, code execution, XSS) are usually high impact because they run attacker-controlled input with the app's privileges.
 
 Key Forge Injection Risks
 
@@ -42,3 +42,7 @@ CWE References
 - CWE-1321: Prototype Pollution
 - CWE-918: Server-Side Request Forgery
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-jql-cql-injection` (WARNING): request data reaches a variable that holds JQL or CQL text. Confirm that the resulting query is sent with the caller's permissions (`asUser()`) and that the injected text cannot widen the result set; with `asApp()` this becomes the IDOR class covered by `@forge-authn-authz/asapp-privilege-escalation.mdc`.
+- The injection subrules name their own deterministic signals (SQL, XSS, prototype pollution, RCE, SSRF).

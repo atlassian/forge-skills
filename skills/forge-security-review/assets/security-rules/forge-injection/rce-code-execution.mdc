@@ -8,7 +8,6 @@ Context
 
 - Forge apps may execute user-provided code via `AsyncFunction`, `Function()`, `eval()`, or similar constructs. In RuntimeV2, this executes in a shared AWS Lambda context with tenant isolation risks.
 - Related CWE: CWE-94 (Code Injection), CWE-95 (Eval Injection).
-- Past issues: JMCF RCE Investigation - scripted fields executing user code in shared global scope.
 - Severity: Critical - enables arbitrary code execution, data exfiltration, tenant data leakage.
 
 Scope & Signals
@@ -150,10 +149,15 @@ Remediation Guidance (advisory)
 - Implement strict timeouts and resource limits.
 - Audit what APIs are exposed to user scripts.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-sandbox-no-dynamic-code` (ERROR): `eval`, `new Function(...)`, the `AsyncFunction` constructor, or string arguments to `setTimeout` / `setInterval` in backend code; vendored UI libraries are excluded. Trace the code string to user input to decide between RCE and hardening.
+- `forge-sandbox-no-child-process` (ERROR) and `forge-sandbox-no-filesystem` (WARNING): `child_process` and `fs` imports (including `node:` specifiers) in backend code. The Forge runtime restricts both; their presence usually signals a misunderstanding of the sandbox or a leftover from a Node service.
+
 Reporting Guidance
 
 - Document the code execution mechanism and where user input enters.
 - Explain Lambda warm start implications for tenant isolation.
 - Provide PoC showing global state pollution or cross-tenant leakage.
-- Map to CWE-94, CWE-95; reference JMCF investigation.
+- Map to CWE-94, CWE-95.
 

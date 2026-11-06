@@ -9,7 +9,6 @@ Context
 - Forge SQL API provides `sql.executeRaw()` and `sql.prepare()` for database operations. SQL injection occurs when untrusted input is interpolated into query strings.
 - Related CWE: CWE-89 (SQL Injection).
 - Severity: Critical - can lead to data exfiltration, manipulation, and privilege escalation.
-- Reference: Internal VULN Guide to SQL Injection in Forge Apps.
 
 Scope & Signals
 
@@ -119,19 +118,9 @@ Remediation Guidance (advisory)
 - For dynamic table/column names, use strict allowlists.
 - Never use string concatenation or interpolation for SQL.
 
-Semgrep Detection
+Deterministic Signals (OpenGrep rules)
 
-```yaml
-rules:
-  - id: forge-sql-injection
-    patterns:
-      - pattern-either:
-          - pattern: sql.executeRaw(`... ${$VAR} ...`)
-          - pattern: sql.executeRaw("..." + $VAR + "...")
-          - pattern: sql.prepare(`... ${$VAR} ...`).execute()
-    message: "Potential SQL injection - use bindParams()"
-    severity: ERROR
-```
+- `forge-dynamic-raw-sql-query` (ERROR): request data flows into the SQL text of `executeRaw`, `queryRaw`, `prepareRaw`, `prepare` or `executeDDL`. `Number()`, `parseInt`, `.length`, schema `.parse()` and the SQL client's own escaping helpers count as sanitisers; a custom quote-escaping function does not.
 
 Reporting Guidance
 

@@ -8,8 +8,7 @@ Context
 
 - Forge Custom UI apps run in iframes and can be vulnerable to XSS when `unsafe-inline` is enabled in the manifest CSP and user content is rendered without sanitization.
 - Related CWE: CWE-79 (Cross-Site Scripting).
-- Only ~23% of Forge apps (473/2033) enable `unsafe-inline`; focus review on these.
-- Reference: Internal Forge VULN Guide to XSS.
+- Focus review on apps that enable `unsafe-inline` for scripts.
 
 Prerequisites for XSS in Forge
 
@@ -138,6 +137,16 @@ Remediation Guidance (advisory)
 - When HTML rendering is required, use DOMPurify with strict allowlists.
 - Validate and sanitize at the point of use, not just input.
 - Consider using Atlassian's UI Kit components which handle escaping.
+
+Deterministic Signals (OpenGrep rules)
+
+- `forge-bridge-invoke-to-html-sink` and `forge-bridge-invoke-then-html-sink` (ERROR): the result of a `@forge/bridge` `invoke()` call reaches `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write` or `dangerouslySetInnerHTML`, directly or inside a `.then()` callback. `DOMPurify.sanitize` and similar calls are sanitisers.
+- `forge-bridge-product-data-to-html-sink` and `forge-bridge-product-data-then-html-sink` (ERROR): the same sinks fed by `requestJira` / `requestConfluence` responses or `view.getContext()` data.
+- `forge-webtrigger-html-response-interpolation` (ERROR): request data interpolated into a web trigger response sent as `text/html`.
+- `forge-unsafe-html-rendering` (WARNING): any other HTML built from a template or assigned to a sink (exports, emails, storage-format builders). Trace the content source; constant templates and sanitised content are not findings.
+- `forge-bridge-postmessage-wildcard-origin` (ERROR): `postMessage(..., '*')` from Custom UI code.
+- Data that reaches an HTML sink through React state is not flagged; follow the results of `invoke()`, `requestJira()`, `requestConfluence()`, `requestBitbucket()` and `view.getContext()` through `useState` manually.
+- `forge-manifest-csp-unsafe-script-directive` (WARNING, see `@forge-manifest-config/content-security-policy.mdc`): a manifest that relaxes the script policy is the precondition for most of the sinks above; the rule reports it, not an exploitable sink.
 
 Reporting Guidance
 

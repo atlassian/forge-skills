@@ -8,7 +8,7 @@ Context
 
 - Forge display conditions only control UI visibility; they do NOT provide authorization. Attackers can bypass hidden UI by directly invoking resolvers via GraphQL or the bridge.
 - Related CWE: CWE-862 (Missing Authorization), CWE-656 (Reliance on Security Through Obscurity).
-- Documented footgun: PBAC-292 - Display conditions mistaken for authorization.
+- Known footgun: display conditions are mistaken for authorization.
 
 The Security Gap
 

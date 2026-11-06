@@ -16,9 +16,9 @@ Key Forge Auditing Concerns
 
 Subrules
 
-- Logging Security → `@forge-auditing/logging-security.mdc`
-- Error Handling → `@forge-auditing/error-handling.mdc`
 - Static Analysis for Forge → `@forge-auditing/static-analysis-forge.mdc`
+<!-- - Logging Security → `@forge-auditing/logging-security.mdc`
+- Error Handling → `@forge-auditing/error-handling.mdc` -->
 
 Detection Heuristics
 
@@ -28,8 +28,8 @@ Detection Heuristics
 
 SAST Tools for Forge
 
-- Semgrep: Custom rules for Forge patterns (sql.executeRaw, dangerouslySetInnerHTML, etc.)
-- FSRT: Forge Static Review Tool for AuthN/AuthZ and secrets scanning
+- OpenGrep with the packaged Forge rule packs (`assets/opengrep-rules/`): deterministic Forge patterns, run by `scripts/run_static_analysis.sh`
+- FSRT: Forge Security Requirements Tester for AuthN/AuthZ and secrets scanning, run by the same script
 - Snyk: SCA for dependency vulnerabilities
 
 Forge-Specific Logging Concerns
@@ -45,3 +45,7 @@ CWE References
 - CWE-117: Improper Output Neutralization for Logs
 - CWE-532: Insertion of Sensitive Information into Log File
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-sensitive-data-console-logging` (WARNING): whole request, event, context or payload objects, or credential-named values, written to the console from backend code.
+- `forge-ui-credential-console-logging` (WARNING): a credential-named value logged from Custom UI code, where it lands in the browser console.

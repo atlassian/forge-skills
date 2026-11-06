@@ -1,0 +1,57 @@
+modules:
+  jira:adminPage:
+    - key: admin
+      resource: main
+      resolver:
+        function: shared-resolver
+      title: Admin
+  jira:issuePanel:
+    - key: panel
+      resource: main
+      resolver:
+        function: shared-resolver
+      title: Panel
+      displayConditions:
+        permissions:
+          - ADMINISTER
+  rovo:agent:
+    - key: helper
+      name: Helper
+      actions:
+        - do-thing
+  action:
+    - key: do-thing
+      function: shared-resolver
+      actionVerb: GET
+      description: does a thing
+      inputs:
+        text:
+          title: Text
+          type: string
+          required: true
+  function:
+    - key: shared-resolver
+      handler: index.handler
+resources:
+  - key: main
+    path: static/build
+permissions:
+  scopes:
+    - read:jira-work
+    - read:app-user-token
+    - manage:jira-configuration
+    - write:jira-admin
+  external:
+    fetch:
+      backend:
+        - '*'
+        - '*.example.com'
+        - '*.ngrok.io'
+        - '*.cloudfront.net'
+  content:
+    scripts:
+      - unsafe-inline
+      - unsafe-eval
+app:
+  runtime:
+    name: nodejs20.x
