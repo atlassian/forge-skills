@@ -131,7 +131,10 @@ class ScriptTests(unittest.TestCase):
         sh_ver = re.search(r"^OPENGREP_VERSION='([^']+)'", sh, re.M).group(1)
         ps1_ver = re.search(r"^\$OpenGrepVersion = '([^']+)'", ps1, re.M).group(1)
         self.assertEqual(sh_ver, ps1_ver)
-        sh_win_fsrt = re.search(r"^FSRT_SHA256_x86_64_pc_windows_msvc='([0-9a-f]{64})'", sh, re.M).group(1)
+        ps1_platform = re.search(r"^\$FsrtPlatform = '([^']+)'", ps1, re.M).group(1)
+        sh_win_fsrt = re.search(
+            rf"^FSRT_SHA256_{ps1_platform.replace('-', '_')}='([0-9a-f]{{64}})'", sh, re.M
+        ).group(1)
         ps1_fsrt = re.search(r"^\$FsrtSha256 = '([0-9A-Fa-f]{64})'", ps1, re.M).group(1)
         self.assertEqual(sh_win_fsrt.lower(), ps1_fsrt.lower())
         sh_win_og = re.search(r"^OPENGREP_SHA256_windows_x86='([0-9a-f]{64})'", sh, re.M).group(1)
@@ -141,10 +144,10 @@ class ScriptTests(unittest.TestCase):
     def test_every_platform_has_a_checksum(self):
         sh = SH_SCRIPT.read_text(encoding="utf-8")
         for var in (
-            "FSRT_SHA256_aarch64_apple_darwin",
-            "FSRT_SHA256_aarch64_unknown_linux_gnu",
-            "FSRT_SHA256_x86_64_unknown_linux_gnu",
-            "FSRT_SHA256_x86_64_pc_windows_msvc",
+            "FSRT_SHA256_macos_aarch64",
+            "FSRT_SHA256_linux_aarch64",
+            "FSRT_SHA256_linux_x86_64",
+            "FSRT_SHA256_windows_x86_64",
             "OPENGREP_SHA256_osx_arm64",
             "OPENGREP_SHA256_osx_x86",
             "OPENGREP_SHA256_manylinux_x86",
@@ -153,6 +156,16 @@ class ScriptTests(unittest.TestCase):
             "OPENGREP_SHA256_musllinux_aarch64",
             "OPENGREP_SHA256_windows_x86",
         ):
+            self.assertIsNotNone(re.search(rf"^{var}='[0-9a-f]{{64}}'", sh, re.M), f"{var} missing or malformed")
+
+    def test_every_detected_fsrt_platform_has_a_pin(self):
+        # detect_platform() picks the FSRT asset name; the checksum variable is derived from it,
+        # so a platform without a pin would silently fall back to "no FSRT release asset".
+        sh = SH_SCRIPT.read_text(encoding="utf-8")
+        platforms = set(re.findall(r"^\s+FSRT_PLATFORM='([^']+)'", sh, re.M))
+        self.assertEqual(platforms, {"macos-aarch64", "linux-aarch64", "linux-x86_64", "windows-x86_64"})
+        for platform in platforms:
+            var = "FSRT_SHA256_" + platform.replace("-", "_")
             self.assertIsNotNone(re.search(rf"^{var}='[0-9a-f]{{64}}'", sh, re.M), f"{var} missing or malformed")
 
     def test_gitignore_covers_downloaded_binaries(self):

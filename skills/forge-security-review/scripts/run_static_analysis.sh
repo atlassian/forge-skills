@@ -32,19 +32,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RULES_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/assets/opengrep-rules"
 
 # ----------------------------------------------------------------------------------------------
-# FSRT pin. A specific, immutable GitHub release tag on the atlassian-labs/FSRT repository that
-# Atlassian controls. Each artifact's SHA-256 is pinned per platform and verified after download
-# so a tampered or substituted release asset is rejected before it is ever executed.
+# FSRT pin. A specific release tag on the atlassian-labs/FSRT repository that Atlassian controls.
+# Each release asset is named fsrt-<platform>.<ext> (tar.gz on macOS and Linux, zip on Windows),
+# holding fsrt (or fsrt.exe) at the archive root. Each asset's SHA-256 is pinned per platform and
+# verified after download so a tampered or substituted release asset is rejected before it is
+# ever executed. The Linux builds are dynamically linked against glibc.
 # ----------------------------------------------------------------------------------------------
-FSRT_RELEASE_TAG='forge-security-review-test'
-FSRT_ASSET_PREFIX='fsrt-tkallady-release-workflow'
-FSRT_ASSET_EXT_UNIX='zip'      # archive type of the macOS/Linux assets (zip for this release)
+FSRT_RELEASE_TAG='v0.1.1'
+FSRT_ASSET_EXT_UNIX='tar.gz'
 FSRT_ASSET_EXT_WINDOWS='zip'
 FSRT_BASE_URL="https://github.com/atlassian-labs/FSRT/releases/download/${FSRT_RELEASE_TAG}"
-FSRT_SHA256_aarch64_apple_darwin='fbee410150a79ec6d7efe992a20006e633218a17f1cab053c116a74061f8774d'
-FSRT_SHA256_aarch64_unknown_linux_gnu='161876b5b81007615a7552ae25057ec35ffe518defdc6d83b720bba1b34cf5ac'
-FSRT_SHA256_x86_64_unknown_linux_gnu='776282e121cfe15ed099a13a0cd2ea91944b00daa36aa04cf36ff28d870993e7'
-FSRT_SHA256_x86_64_pc_windows_msvc='970c91957df7ddbe23cc45716f16a88c10e8e080efdc7b0df2c3bdf726ffcd83'
+FSRT_SHA256_macos_aarch64='89e9974c77b597234e7c8b8f3d9628b780e36ffcc778cc8d5ec0631275aa56e2'
+FSRT_SHA256_linux_aarch64='06c2e01b875b2b14f9a3631b47aaf096957c08f4e8c69f10d0a739dcac229c52'
+FSRT_SHA256_linux_x86_64='ee850fb534c7bb136acd7459ad4cb01191fe4a7f4d271692c8c164929be5c113'
+FSRT_SHA256_windows_x86_64='e3487415f161cddc2bad3cde7c8c517a7e3ecffbf307227500886529f143e310'
 
 # ----------------------------------------------------------------------------------------------
 # OpenGrep pin. Official release assets from github.com/opengrep/opengrep (LGPL-2.1, no
@@ -73,7 +74,7 @@ IS_WINDOWS=0
 FSRT_ASSET_EXT="${FSRT_ASSET_EXT_UNIX}"
 FSRT_BIN="${SCRIPT_DIR}/fsrt"
 OPENGREP_BIN="${SCRIPT_DIR}/opengrep"
-FSRT_TARGET=''
+FSRT_PLATFORM=''
 OPENGREP_ASSET=''
 
 # Per-tool state collected for the summary.
@@ -108,11 +109,11 @@ detect_platform() {
 	Darwin)
 		case "${arch}" in
 		arm64 | aarch64)
-			FSRT_TARGET='aarch64-apple-darwin'
+			FSRT_PLATFORM='macos-aarch64'
 			OPENGREP_ASSET='osx_arm64'
 			;;
 		x86_64)
-			FSRT_TARGET='' # no FSRT release asset for Intel macOS yet
+			FSRT_PLATFORM='' # no FSRT release asset for Intel macOS yet
 			OPENGREP_ASSET='osx_x86'
 			;;
 		esac
@@ -124,11 +125,11 @@ detect_platform() {
 		fi
 		case "${arch}" in
 		aarch64 | arm64)
-			FSRT_TARGET='aarch64-unknown-linux-gnu'
+			FSRT_PLATFORM='linux-aarch64'
 			OPENGREP_ASSET="${libc}_aarch64"
 			;;
 		x86_64 | amd64)
-			FSRT_TARGET='x86_64-unknown-linux-gnu'
+			FSRT_PLATFORM='linux-x86_64'
 			OPENGREP_ASSET="${libc}_x86"
 			;;
 		esac
@@ -138,7 +139,7 @@ detect_platform() {
 		x86_64 | amd64)
 			IS_WINDOWS=1
 			FSRT_ASSET_EXT="${FSRT_ASSET_EXT_WINDOWS}"
-			FSRT_TARGET='x86_64-pc-windows-msvc'
+			FSRT_PLATFORM='windows-x86_64'
 			FSRT_BIN="${SCRIPT_DIR}/fsrt.exe"
 			OPENGREP_ASSET='windows_x86'
 			OPENGREP_BIN="${SCRIPT_DIR}/opengrep.exe"
@@ -147,7 +148,7 @@ detect_platform() {
 		;;
 	esac
 
-	if [[ -z "${FSRT_TARGET}" && -z "${OPENGREP_ASSET}" ]]; then
+	if [[ -z "${FSRT_PLATFORM}" && -z "${OPENGREP_ASSET}" ]]; then
 		echo "Error: unsupported platform '${os}/${arch}'. Supported: macOS (arm64, x86_64 for OpenGrep), Linux (x86_64, arm64), Windows (x86_64)." >&2
 		exit 2
 	fi
@@ -202,19 +203,19 @@ download_verified() {
 # FSRT
 # ----------------------------------------------------------------------------------------------
 install_fsrt() {
-	local sha_var="FSRT_SHA256_${FSRT_TARGET//-/_}" expected url tmp_dir archive found
+	local sha_var="FSRT_SHA256_${FSRT_PLATFORM//-/_}" expected url tmp_dir archive found
 	expected="${!sha_var:-}"
 	if [[ -z "${expected}" ]]; then
-		echo "no pinned FSRT checksum for ${FSRT_TARGET}; refusing to download an unverified binary" >&2
+		echo "no pinned FSRT checksum for ${FSRT_PLATFORM}; refusing to download an unverified binary" >&2
 		return 1
 	fi
 	require_cmd tar || return 1
 
-	url="${FSRT_BASE_URL}/${FSRT_ASSET_PREFIX}-${FSRT_TARGET}.${FSRT_ASSET_EXT}"
+	url="${FSRT_BASE_URL}/fsrt-${FSRT_PLATFORM}.${FSRT_ASSET_EXT}"
 	tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d "${OUTPUT_DIR}/fsrt/tmp.XXXXXX")" || return 1
 	archive="${tmp_dir}/fsrt-artifact.${FSRT_ASSET_EXT}"
 
-	log "fsrt not found in ${SCRIPT_DIR}. Downloading the pinned release for ${FSRT_TARGET}..."
+	log "fsrt not found in ${SCRIPT_DIR}. Downloading the pinned release for ${FSRT_PLATFORM}..."
 	if ! download_verified "${url}" "${expected}" "${archive}"; then
 		rm -rf "${tmp_dir}"
 		return 1
@@ -236,16 +237,8 @@ install_fsrt() {
 		;;
 	esac
 
-	# Release assets have been packaged as zip -> tar.gz -> <dir>/fsrt. Unpack any nested
-	# tarball, then locate the binary wherever it sits.
-	local nested
-	while IFS= read -r nested; do
-		[[ -n "${nested}" ]] || continue
-		mkdir -p "${tmp_dir}/nested"
-		tar -xzf "${nested}" -C "${tmp_dir}/nested" || { rm -rf "${tmp_dir}"; return 1; }
-	done < <(find "${tmp_dir}/extracted" -type f \( -name '*.tar.gz' -o -name '*.tgz' \))
-
-	found="$(find "${tmp_dir}/extracted" "${tmp_dir}/nested" -type f \( -name fsrt -o -name fsrt.exe \) 2>/dev/null | head -n 1)"
+	# The archive holds the binary at its root (fsrt, or fsrt.exe on Windows).
+	found="$(find "${tmp_dir}/extracted" -type f \( -name fsrt -o -name fsrt.exe \) 2>/dev/null | head -n 1)"
 	if [[ -z "${found}" ]]; then
 		echo "could not find 'fsrt' or 'fsrt.exe' inside the downloaded artifact" >&2
 		rm -rf "${tmp_dir}"
@@ -274,7 +267,7 @@ run_fsrt() {
 		FSRT_DETAIL='FORGE_SA_SKIP_FSRT=1'
 		return
 	fi
-	if [[ -z "${FSRT_TARGET}" ]]; then
+	if [[ -z "${FSRT_PLATFORM}" ]]; then
 		FSRT_STATUS='not_run'
 		FSRT_DETAIL='no FSRT release asset for this platform'
 		warn "FSRT: ${FSRT_DETAIL}"

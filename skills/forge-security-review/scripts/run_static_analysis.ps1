@@ -32,15 +32,15 @@ $RulesDir = Join-Path (Split-Path -Parent $ScriptDir) 'assets\opengrep-rules'
 $FsrtExe = Join-Path $ScriptDir 'fsrt.exe'
 $OpenGrepExe = Join-Path $ScriptDir 'opengrep.exe'
 
-# FSRT pin: a specific, immutable GitHub release tag on atlassian-labs/FSRT (Atlassian-controlled).
-# The SHA-256 is verified after download so a tampered or substituted asset is rejected before it
-# is ever executed. Keep these values in sync with run_static_analysis.sh.
-$FsrtReleaseTag = 'forge-security-review-test'
-$FsrtAssetPrefix = 'fsrt-tkallady-release-workflow'
+# FSRT pin: a specific release tag on atlassian-labs/FSRT (Atlassian-controlled). The asset is
+# named fsrt-<platform>.<ext> and holds fsrt.exe at the archive root. The SHA-256 is verified after
+# download so a tampered or substituted asset is rejected before it is ever executed. Keep these
+# values in sync with run_static_analysis.sh.
+$FsrtReleaseTag = 'v0.1.1'
 $FsrtAssetExt = 'zip'
-$FsrtTarget = 'x86_64-pc-windows-msvc'
-$FsrtUrl = "https://github.com/atlassian-labs/FSRT/releases/download/$FsrtReleaseTag/$FsrtAssetPrefix-$FsrtTarget.$FsrtAssetExt"
-$FsrtSha256 = '970C91957DF7DDBE23CC45716F16A88C10E8E080EFDC7B0DF2C3BDF726FFCD83'
+$FsrtPlatform = 'windows-x86_64'
+$FsrtUrl = "https://github.com/atlassian-labs/FSRT/releases/download/$FsrtReleaseTag/fsrt-$FsrtPlatform.$FsrtAssetExt"
+$FsrtSha256 = 'E3487415F161CDDC2BAD3CDE7C8C517A7E3ECFFBF307227500886529F143E310'
 
 # OpenGrep pin: official release asset from github.com/opengrep/opengrep (LGPL-2.1, no telemetry).
 $OpenGrepVersion = '1.16.2'
@@ -102,7 +102,7 @@ function Install-Fsrt {
     try {
         $archive = Join-Path $tmpDir "fsrt-artifact.$FsrtAssetExt"
         $extracted = Join-Path $tmpDir 'extracted'
-        Write-Log "fsrt.exe not found in $ScriptDir. Downloading the pinned release for $FsrtTarget..."
+        Write-Log "fsrt.exe not found in $ScriptDir. Downloading the pinned release for $FsrtPlatform..."
         Install-VerifiedDownload -Url $FsrtUrl -ExpectedSha256 $FsrtSha256 -Destination $archive
 
         New-Item -ItemType Directory -Path $extracted | Out-Null
@@ -114,20 +114,8 @@ function Install-Fsrt {
             if ($LASTEXITCODE -ne 0) { throw "tar failed to extract $archive" }
         }
 
-        # Release assets have been packaged as zip -> tar.gz -> <dir>\fsrt.exe. Unpack any nested
-        # tarball, then locate the binary wherever it sits.
-        $nested = Get-ChildItem -LiteralPath $extracted -File -Recurse | Where-Object { $_.Name -match '\.(tar\.gz|tgz)$' }
-        foreach ($n in $nested) {
-            if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
-                throw "nested archive found ($($n.FullName)) but 'tar' is not available to extract it"
-            }
-            $nestedDir = Join-Path $tmpDir 'nested'
-            if (-not (Test-Path -LiteralPath $nestedDir)) { New-Item -ItemType Directory -Path $nestedDir | Out-Null }
-            & tar -xzf $n.FullName -C $nestedDir
-            if ($LASTEXITCODE -ne 0) { throw "tar failed to extract $($n.FullName)" }
-        }
-
-        $found = Get-ChildItem -LiteralPath $tmpDir -File -Recurse |
+        # The archive holds the binary at its root.
+        $found = Get-ChildItem -LiteralPath $extracted -File -Recurse |
             Where-Object { $_.Name -ieq 'fsrt.exe' -or $_.Name -ieq 'fsrt' } |
             Select-Object -First 1
         if ($null -eq $found) {
