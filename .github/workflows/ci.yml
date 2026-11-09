@@ -38,7 +38,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.15"
 
       # Runs the rule-pack structure checks, the wrapper script checks and the fixture scans.
       # The fixture scans download the pinned OpenGrep release once and verify its checksum.
