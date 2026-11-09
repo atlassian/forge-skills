@@ -10,8 +10,8 @@ alwaysApply: false
 
 Key Forge Rovo Agent Risks
 
-- A4J running with elevated privileges: Agents executing actions with asApp() without proper authorization checks.
-- Known AuthZ gap (AGRC-15320): Agents can execute actions with higher privileges than intended.
+- Agent actions running with elevated privileges: Agents executing actions with asApp() without proper authorization checks.
+- Privilege gap: Agents can execute actions with higher privileges than the requesting user.
 - LLM-generated URL risks: SSRF and data egress when agents render or fetch LLM-generated URLs.
 - Browser context consumption: Agents consuming user-controlled browser context URLs.
 - Cross-site/cross-product access: Custom agents providing unintended access across products.
@@ -20,7 +20,7 @@ Key Forge Rovo Agent Risks
 Subrules
 
 - Agent Privilege Escalation → `@forge-rovo-agents/agent-privilege-escalation.mdc`
-- LLM Output Injection → `@forge-rovo-agents/llm-output-injection.mdc`
+<!-- - LLM Output Injection → `@forge-rovo-agents/llm-output-injection.mdc` -->
 <!-- - Agent Action Authorization → `@forge-rovo-agents/agent-action-authz.mdc`
 - Cross-Product Access Controls → `@forge-rovo-agents/cross-product-access.mdc` -->
 - Prefer Using Function Context Object → `@forge-authn-authz/prefer-context-authz.mdc`

@@ -1,0 +1,58 @@
+modules:
+  jira:adminPage:
+    - key: admin
+      resource: main
+      resolver:
+        function: shared-resolver
+      title: Admin
+  jira:issuePanel:
+    - key: panel
+      resource: main
+      resolver:
+        function: shared-resolver
+      title: Panel
+  rovo:agent:
+    - key: helper
+      name: Helper
+      actions:
+        - do-thing
+  action:
+    - key: do-thing
+      function: shared-resolver
+      actionVerb: GET
+      description: does a thing
+      inputs:
+        text:
+          title: Text
+          type: string
+          required: true
+  webtrigger:
+    - key: webhook
+      function: webhook
+  function:
+    - key: shared-resolver
+      handler: index.handler
+    - key: webhook
+      handler: webhook.handler
+resources:
+  - key: main
+    path: static/build
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+    - storage:app
+  external:
+    fetch:
+      backend:
+        - api.example.com
+        - idp.example.com
+        - backend.example.com
+      client:
+        - cdn.example.com
+  content:
+    styles:
+      - unsafe-inline
+app:
+  runtime:
+    name: nodejs22.x

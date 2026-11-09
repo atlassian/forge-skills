@@ -27,3 +27,21 @@ jobs:
       - name: Run tests
         working-directory: skills/forge-app-builder
         run: python -m unittest discover -s tests -v
+
+  security-review:
+    name: Security review rule packs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Runs the rule-pack structure checks, the wrapper script checks and the fixture scans.
+      # The fixture scans download the pinned OpenGrep release once and verify its checksum.
+      - name: Run tests
+        working-directory: skills/forge-security-review
+        run: python -m unittest discover -s tests -v

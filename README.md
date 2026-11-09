@@ -20,7 +20,7 @@ The plugin ships multiple skills under `skills/`, each with a `SKILL.md` the hos
 
 **Forge Connector** (`skills/forge-connector/`) guides building `graph:connector` apps that ingest external data into Atlassian's Teamwork Graph, making it searchable in Rovo Search and surfaced in Rovo Chat.
 
-**Forge Security Review** (`skills/forge-security-review/`) performs white-box Forge app security audits with rule-driven checks for authz, injection, tenant isolation, secrets handling, egress/remotes, web triggers, and optional static-analysis workflows.
+**Forge Security Review** (`skills/forge-security-review/`) performs white-box Forge app security audits with rule-driven checks for authz, injection, tenant isolation, secrets handling, egress/remotes, web triggers, and a pinned deterministic layer (FSRT plus OpenGrep running Forge-specific rule packs) that feeds the review.
 
 ### Forge MCP Server
 

@@ -8,7 +8,7 @@ Context
 
 - Forge web triggers are publicly accessible URLs with no built-in authentication. Apps must implement their own authentication, replay protection, and input validation.
 - Related CWE: CWE-306 (Missing Authentication for Critical Function).
-- Known footgun: PBAC-832 - Webtriggers have no supported authentication mechanism.
+- Known footgun: web triggers have no supported authentication mechanism.
 
 Scope & Signals
 
@@ -163,11 +163,17 @@ Remediation Guidance (advisory)
 - Validate and sanitize all input from request body.
 - Log authentication failures for monitoring.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-webtrigger-missing-auth` (ERROR, manifest correlation required): an exported handler reads `event.body`, `headers`, `queryParameters` or `path` and contains no recognised verification (`createHmac`, `timingSafeEqual`, `jwt.verify`, `verifySignature`, a `storage.getSecret` comparison, an inbound `authorization` header read). The rule cannot tell web triggers from async-event or queue consumers: resolve `modules.webtrigger[].function` -> `modules.function[].handler`, keep only declared handlers, and also read every declared handler the rule did not flag, because authentication inside a helper is invisible to it.
+- `forge-webtrigger-literal-shared-secret` (ERROR): a header or query value compared with a string literal (a hardcoded secret and a non-constant-time comparison).
+- `forge-webtrigger-html-response-interpolation` (ERROR, see `@forge-injection/xss.mdc`): request data interpolated into a `text/html` response body.
+
 Reporting Guidance
 
 - Document each web trigger module and its handler.
 - Describe missing authentication/validation controls.
 - Assess sensitivity of operations performed.
 - Provide PoC showing unauthenticated access.
-- Map to CWE-306; reference PBAC-832.
+- Map to CWE-306.
 

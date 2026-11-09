@@ -8,7 +8,6 @@ Context
 
 - Forge Custom UI apps can redirect users via `window.location` with sensitive data appended to URLs. No browser CSP directive currently prevents this.
 - Related CWE: CWE-201 (Insertion of Sensitive Information Into Sent Data).
-- Reference: Internal VULN Guide to window.location data egress.
 
 Scope & Signals
 

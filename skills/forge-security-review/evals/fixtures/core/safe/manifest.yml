@@ -1,0 +1,52 @@
+modules:
+  jira:issuePanel:
+    - key: panel
+      function: main
+      resolver:
+        function: main
+  confluence:macro:
+    - key: public-macro
+      function: main
+      resolver:
+        function: main
+  webtrigger:
+    - key: sync-endpoint
+      function: syncHandler
+    - key: jwt-endpoint
+      function: jwtHandler
+    - key: report-endpoint
+      function: reportHandler
+    - key: cors-endpoint
+      function: corsHandler
+  function:
+    - key: main
+      handler: index.handler
+    - key: syncHandler
+      handler: webtrigger.handler
+    - key: jwtHandler
+      handler: webtrigger.jwtHandler
+    - key: reportHandler
+      handler: webtrigger.reportTrigger
+    - key: corsHandler
+      handler: webtrigger.corsHandler
+    - key: install
+      handler: lifecycle.onInstall
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+    - storage:app
+    - read:jira-user
+  external:
+    fetch:
+      backend:
+        - "api.example.com"
+  content:
+    scripts:
+app:
+  id: ari:cloud:ecosystem::app/11111111-1111-1111-1111-111111111111
+  name: sample-safe-app
+  lifecycleEvents:
+    installed: install
+  runtime:
+    name: nodejs22.x

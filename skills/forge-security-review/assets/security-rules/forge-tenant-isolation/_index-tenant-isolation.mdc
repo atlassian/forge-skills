@@ -32,7 +32,7 @@ Detection Heuristics
 Forge-Specific Caveats
 
 - RuntimeV2 uses AWS Lambda isolation instead of V1's custom sandbox, shifting tenant isolation responsibility to app developers.
-- User-supplied code execution (like JMCF scripted fields) in shared global scope is high risk.
+- User-supplied code execution (for example user-defined scripted fields) in shared global scope is high risk.
 
 CWE References
 
@@ -41,3 +41,7 @@ CWE References
 - CWE-212: Improper Removal of Sensitive Information Before Storage or Transfer
 - CWE-1189: Improper Isolation of Shared Resources
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-module-state-holds-request-data` (WARNING), `forge-process-env-mutation` (ERROR), `forge-private-cross-tenant-api` (ERROR): see `@forge-tenant-isolation/global-state-warmstart.mdc`.
+- `forge-storage-key-user-controlled` (ERROR) and `forge-storage-tainted-key` (WARNING): see `@forge-authn-authz/missing-resolver-authz.mdc`.

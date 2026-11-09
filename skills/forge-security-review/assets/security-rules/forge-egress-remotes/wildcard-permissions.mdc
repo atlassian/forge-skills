@@ -8,7 +8,6 @@ Context
 
 - Wildcard patterns in `permissions.external.fetch` can expose apps to SSRF, data exfiltration, and unintended external communications. Explicit domain allowlists are required.
 - Related CWE: CWE-942 (Permissive Cross-domain Policy), CWE-918 (SSRF).
-- Reference: Internal VULN Guide to Insecure Wildcard Remotes.
 
 Scope & Signals
 
@@ -154,6 +153,11 @@ Remediation Guidance (advisory)
 - Remove development/localhost patterns from production manifests.
 - Implement request-time validation in addition to manifest controls.
 - Consider using Forge External Auth for authenticated external services.
+
+Deterministic Signals (OpenGrep rules)
+
+- `forge-manifest-wildcard-egress` (ERROR): `"*"` under `permissions.external.fetch.backend`, `fetch.client` or `scripts`. Removes the only control the app has over where it sends data and loads code.
+- `forge-manifest-shared-hosting-wildcard-egress` (WARNING): a wildcard over a shared hosting or CDN domain (`*.cloudfront.net`, `*.amazonaws.com`, `*.googleapis.com`, `*.github.io`, `*.vercel.app` and similar), which admits every tenant of that provider. Atlassian platform and analytics vendor domains are not reported.
 
 Reporting Guidance
 

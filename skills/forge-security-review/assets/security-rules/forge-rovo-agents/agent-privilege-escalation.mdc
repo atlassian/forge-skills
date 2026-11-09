@@ -6,9 +6,8 @@ alwaysApply: false
 
 Context
 
-- Forge Rovo agents can execute actions with elevated privileges via `asApp()`. A known AuthZ gap (AGRC-15320) allows agents to perform actions with higher privileges than the requesting user.
+- Forge Rovo agents can execute actions with elevated privileges via `asApp()`. An action can therefore perform more than the requesting user is allowed to.
 - Related CWE: CWE-269 (Improper Privilege Management), CWE-862 (Missing Authorization).
-- Reference: Rovo Forge A4J Risk documentation.
 
 Scope & Signals
 
@@ -165,11 +164,15 @@ Remediation Guidance (advisory)
 - Log all agent actions for audit trail.
 - Document authorization model in agent action code.
 
+Deterministic Signals (OpenGrep rules)
+
+- `forge-llm-output-drives-privileged-action` (WARNING): the reply of a model call (`openai`, `anthropic`, `bedrock`, `rovo`, `chat`, `completion` and similar names) is the condition for a storage write, an `asApp()` mutation, an `invokeRemote` or a `fetch` with a method. Confirm that the privileged step also depends on an explicit user decision carried in the invocation context.
+
 Reporting Guidance
 
 - Document each agent action and its authorization model.
 - Highlight `asApp()` usage without preceding checks.
 - Explain LLM-influenced data flows.
 - Provide PoC for privilege escalation.
-- Map to CWE-269, CWE-862; reference AGRC-15320.
+- Map to CWE-269, CWE-862.
 
