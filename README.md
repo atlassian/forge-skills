@@ -55,7 +55,7 @@ Before you install, make sure you have:
 ### Claude Code
 
 ```
-/plugin install forge-skills@atlassian-forge-skills
+/plugin install forge-skills@claude-plugins-official
 ```
 
 ### Cursor
